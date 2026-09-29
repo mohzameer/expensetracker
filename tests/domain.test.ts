@@ -6,7 +6,7 @@ import { closeBlockers, closeMonth, ensureMonth, getMonth } from "@/server/domai
 import { adjustSavings, getSavingsBalance, moveToCategory } from "@/server/domain/transfers";
 import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
 import { assignCategory, updateExpense } from "@/server/domain/expenses";
-import { createItem, removeCategory, saveSetup } from "@/server/domain/catalog";
+import { createItem, itemsForMonth, removeCategory, saveSetup } from "@/server/domain/catalog";
 import { freshDb, rs, seedSeptember } from "./helpers";
 
 let db: Db;
@@ -177,7 +177,7 @@ describe("setup", () => {
   it("saves everything at once and archives categories with history", async () => {
     const s = await seedSeptember(db);
     await s.expense(s.dining.id, rs(500));
-    const extra = await createItem(db, { categoryId: s.groceries.id, name: "Keells", kind: "one_off" });
+    const extra = await createItem(db, { categoryId: s.groceries.id, name: "Keells", kind: "one_off", ym: "2026-09" });
 
     await saveSetup(db, {
       ym: "2026-09",
@@ -281,5 +281,35 @@ describe("monthly items and caps", () => {
     // Paying it anyway brings it back, so the payment is never hidden.
     await s.expense(s.utilities.id, rs(100), "2026-09-12", s.internet.id);
     expect(await due()).toContain("Internet");
+  });
+});
+
+describe("items across months", () => {
+  it("monthly items carry into every month; one-offs stay in the month they were added for", async () => {
+    const s = await seedSeptember(db);
+    await createItem(db, { categoryId: s.groceries.id, name: "Dress", kind: "one_off", ym: "2026-09" });
+    const sep = (await getMonth(db, "2026-09"))!;
+    const oct = await ensureMonth(db, "2026-10");
+    const names = async (monthId: string) => (await itemsForMonth(db, monthId)).map((i) => i.name).sort();
+
+    expect(await names(sep.id)).toEqual(["Dress", "Internet"]);
+    expect(await names(oct.id)).toEqual(["Internet"]);
+    // Categories and caps still carry over.
+    expect((await summary("2026-10", s.groceries.id)).allocation).toBe(rs(30000));
+    // The same one-off name can be used again in a later month.
+    await createItem(db, { categoryId: s.groceries.id, name: "Dress", kind: "one_off", ym: "2026-10" });
+    expect(await names(oct.id)).toEqual(["Dress", "Internet"]);
+  });
+
+  it("switching an item to monthly in Setup makes it carry over", async () => {
+    const s = await seedSeptember(db);
+    const pads = await createItem(db, { categoryId: s.groceries.id, name: "Pads", kind: "one_off", ym: "2026-09" });
+    await saveSetup(db, {
+      ym: "2026-09", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
+      categories: [{ id: s.groceries.id, name: "Groceries", color: "#00897B", allocation: rs(30000), alertPct: null, removed: false,
+        items: [{ id: pads.id, name: "Pads", kind: "monthly", expectedAmount: rs(10000), defaultAmount: null, removed: false }] }],
+    });
+    const oct = await ensureMonth(db, "2026-10");
+    expect((await itemsForMonth(db, oct.id)).map((i) => i.name)).toContain("Pads");
   });
 });

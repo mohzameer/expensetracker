@@ -1,4 +1,4 @@
-import { and, eq, isNull, max, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, max, or, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { categories, categoryBudgets, expenses, incomes, items, months, settings, transfers } from "@/db/schema";
 import { UserError } from "@/lib/errors";
@@ -40,10 +40,34 @@ export type NewItem = {
   kind: "monthly" | "one_off";
   expectedAmount?: number | null;
   defaultAmount?: number | null;
+  /** The month a one-off item is for (it won't appear in other months). */
+  ym: string;
 };
+
+/** Items offered in a month: every monthly item, plus the one-offs added for that month. */
+export async function itemsForMonth(db: Db, monthId: string | null) {
+  return db
+    .select({
+      id: items.id,
+      categoryId: items.categoryId,
+      name: items.name,
+      kind: items.kind,
+      expectedAmount: items.expectedAmount,
+      defaultAmount: items.defaultAmount,
+    })
+    .from(items)
+    .where(
+      and(
+        isNull(items.archivedAt),
+        monthId ? or(eq(items.kind, "monthly"), eq(items.monthId, monthId)) : eq(items.kind, "monthly"),
+      ),
+    )
+    .orderBy(asc(items.sortOrder), asc(items.name));
+}
 
 export async function createItem(db: Db, input: NewItem) {
   if (input.kind === "monthly" && !input.expectedAmount) throw new UserError("Monthly items need an expected amount.");
+  const monthId = input.kind === "one_off" ? (await ensureMonth(db, input.ym)).id : null;
   const [{ top }] = await db.select({ top: max(items.sortOrder) }).from(items).where(eq(items.categoryId, input.categoryId));
   const [item] = await db
     .insert(items)
@@ -53,6 +77,7 @@ export async function createItem(db: Db, input: NewItem) {
       kind: input.kind,
       expectedAmount: input.kind === "monthly" ? input.expectedAmount : null,
       defaultAmount: input.kind === "one_off" ? (input.defaultAmount ?? null) : null,
+      monthId,
       sortOrder: (top ?? -1) + 1,
     })
     .returning();
@@ -191,6 +216,8 @@ export async function saveSetup(db: Db, p: SetupPayload) {
           kind: it.kind,
           expectedAmount: it.kind === "monthly" ? it.expectedAmount : null,
           defaultAmount: it.kind === "one_off" ? it.defaultAmount : null,
+          // One-offs belong to this month; switching an item to monthly makes it carry over.
+          monthId: it.kind === "one_off" ? month.id : null,
           sortOrder: itemOrder++,
         };
         if (it.id) await tx.update(items).set(values).where(and(eq(items.id, it.id), eq(items.categoryId, categoryId)));

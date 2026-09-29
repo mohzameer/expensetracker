@@ -102,16 +102,24 @@ export const items = pgTable(
     kind: text({ enum: ["monthly", "one_off"] }).notNull(),
     expectedAmount: money(), // monthly items
     defaultAmount: money(), // one-off prefill
+    // One-off items belong to the month they were added for; monthly items (null) carry into every month.
+    monthId: uuid().references(() => months.id),
     sortOrder: integer().notNull().default(0),
     archivedAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("items_category_name_lower_idx").on(t.categoryId, sql`lower(name)`),
+    // Names are unique per category among monthly items, and per category per month among one-offs.
+    uniqueIndex("items_category_name_month_idx").on(
+      t.categoryId,
+      sql`lower(name)`,
+      sql`coalesce(month_id, '00000000-0000-0000-0000-000000000000'::uuid)`,
+    ),
     // Target of the composite FK on expenses, so an expense's item always
     // belongs to the expense's category.
     unique("items_id_category_uq").on(t.id, t.categoryId),
     check("items_kind", sql`kind in ('monthly', 'one_off')`),
+    check("items_month_scope", sql`(kind = 'one_off') = (month_id is not null)`),
     check("items_monthly_expected", sql`kind <> 'monthly' or expected_amount is not null`),
     check("items_expected_positive", sql`expected_amount is null or expected_amount > 0`),
     check("items_default_positive", sql`default_amount is null or default_amount > 0`),

@@ -34,6 +34,7 @@ export const newItemInput = z
     kind: z.enum(["monthly", "one_off"]),
     expectedAmount: optionalAmount,
     defaultAmount: optionalAmount,
+    ym: yearMonth,
   })
   .refine((v) => v.kind !== "monthly" || v.expectedAmount, { message: "Monthly items need an expected amount" });
 

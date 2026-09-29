@@ -194,7 +194,8 @@ export function SetupForm({ data }: { data: Data }) {
         <div className="flex flex-col gap-1.5">
           <MonthHeader ym={data.ym} href={(ym) => `/setup?month=${ym}`} title={`Setup · ${formatMonth(data.ym)}`} />
           <span className="text-sm text-muted-ink">
-            Everything on one page. Categories and items are shared across months; caps and alert % apply to {monthName} only.
+            Everything on one page. Categories and monthly items carry into every month; one-off items are for {monthName} only.
+            Caps and alert % apply to {monthName}.
           </span>
         </div>
         <div className="flex flex-wrap items-end gap-3">

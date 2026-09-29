@@ -149,6 +149,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
         kind: newItem.kind,
         expectedAmount: newItem.kind === "monthly" ? amt : null,
         defaultAmount: newItem.kind === "one_off" ? amt : null,
+        ym: entryYm,
       });
       if (!res.ok) return void toast.error(res.error);
       setExtraItems((i) => [...i, res.data]);
@@ -276,6 +277,11 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
           {newItem && (
             <div className="flex flex-col gap-3 rounded-[14px] border border-teal bg-teal-wash p-3.5">
               <div className="text-sm font-semibold text-teal-deep">New item in {selectedCategory?.name}</div>
+              <p className="-mt-2 text-[13px] text-muted-ink">
+                {newItem.kind === "monthly"
+                  ? "Repeats: it stays under this category every month."
+                  : `Just for ${formatMonth(entryYm, { month: "long" })}: it won't carry into next month.`}
+              </p>
               <input aria-label="Item name" className={inputBox} value={newItem.name} onChange={(e) => setNewItem({ ...newItem, name: e.target.value })} />
               <div role="radiogroup" aria-label="Kind" className="grid grid-cols-2 gap-1 rounded-xl bg-surface p-1">
                 {(["one_off", "monthly"] as const).map((k) => (

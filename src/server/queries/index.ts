@@ -6,6 +6,7 @@ import { categories, categoryBudgets, categoryMonthSummary, expenses, incomes, i
 import { addMonths, currentYearMonth, daysInMonth, firstDay, monthOf, nextMonthStart, today } from "@/lib/dates";
 import { stateAfter } from "@/lib/budget";
 import { closeBlockers, ensureMonth, getMonth, getSettings, type Month } from "@/server/domain/months";
+import { itemsForMonth } from "@/server/domain/catalog";
 import { getSavingsBalance } from "@/server/domain/transfers";
 
 export type CategorySummary = {
@@ -83,24 +84,14 @@ export async function getSummaries(db: Db, month: Month | null): Promise<Categor
     }));
 }
 
-export async function getCatalog(db: Db) {
+/** Categories plus the items offered in a month (monthly items + that month's one-offs). */
+export async function getCatalog(db: Db, month: Month | null = null) {
   const cats = await db
     .select({ id: categories.id, name: categories.name, color: categories.color })
     .from(categories)
     .where(isNull(categories.archivedAt))
     .orderBy(asc(categories.sortOrder), asc(categories.name));
-  const its = await db
-    .select({
-      id: items.id,
-      categoryId: items.categoryId,
-      name: items.name,
-      kind: items.kind,
-      expectedAmount: items.expectedAmount,
-      defaultAmount: items.defaultAmount,
-    })
-    .from(items)
-    .where(isNull(items.archivedAt))
-    .orderBy(asc(items.sortOrder), asc(items.name));
+  const its = await itemsForMonth(db, month?.id ?? null);
   return { categories: cats as CatalogCategory[], items: its as CatalogItem[] };
 }
 
@@ -160,7 +151,7 @@ export async function getDayView(db: Db, date: string) {
   const [settings, summaries, catalog, monthly, dayExpenses, count, savings, monthSpend] = await Promise.all([
     getSettings(db),
     getSummaries(db, month),
-    getCatalog(db),
+    getCatalog(db, month),
     getMonthlyItems(db, month),
     db
       .select(expenseColumns)
@@ -460,7 +451,7 @@ export async function getSetupPage(db: Db, ym: string) {
     getIncomes(db, month),
     getMonthPlan(db, ym),
     getSettings(db),
-    getCatalog(db),
+    getCatalog(db, month),
     month ? db.select().from(categoryBudgets).where(eq(categoryBudgets.monthId, month.id)) : [],
     prev ? db.select().from(categoryBudgets).where(eq(categoryBudgets.monthId, prev.id)) : [],
   ]);

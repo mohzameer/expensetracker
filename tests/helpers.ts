@@ -17,7 +17,7 @@ export async function seedSeptember(db: Db) {
   const groceries = await createCategory(db, { name: "Groceries", allocation: rs(30000), ym: "2026-09" });
   const dining = await createCategory(db, { name: "Dining", allocation: rs(12000), ym: "2026-09" });
   const utilities = await createCategory(db, { name: "Utilities", allocation: rs(18000), ym: "2026-09" });
-  const internet = await createItem(db, { categoryId: utilities.id, name: "Internet", kind: "monthly", expectedAmount: rs(3990) });
+  const internet = await createItem(db, { categoryId: utilities.id, name: "Internet", kind: "monthly", expectedAmount: rs(3990), ym: "2026-09" });
   const expense = (categoryId: string | null, amount: number, spentOn = "2026-09-10", itemId: string | null = null) =>
     createExpense(db, { spentOn, categoryId, itemId, amount, note: null });
   return { groceries, dining, utilities, internet, expense };

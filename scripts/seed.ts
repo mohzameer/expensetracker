@@ -36,6 +36,7 @@ async function seedCatalog(db: Db, ym: string) {
         kind,
         expectedAmount: kind === "monthly" ? rs(amount!) : null,
         defaultAmount: kind === "one_off" && amount ? rs(amount) : null,
+        ym,
       });
       ids[`${c.name}/${name}`] = item.id;
     }
