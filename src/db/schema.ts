@@ -30,8 +30,11 @@ export const settings = pgTable(
     currencyCode: text().notNull().default("LKR"),
     currencySymbol: text().notNull().default("Rs"),
     defaultAlertPct: smallint().notNull().default(10),
+    // Every new month starts with this expected income line (e.g. salary), if set.
+    defaultIncomeSource: text().notNull().default("Salary"),
+    defaultIncomeAmount: money(),
   },
-  () => [check("settings_singleton", sql`id = 1`)],
+  () => [check("settings_singleton", sql`id = 1`), check("settings_default_income", sql`default_income_amount is null or default_income_amount > 0`)],
 );
 
 export const months = pgTable(
@@ -142,7 +145,7 @@ export const expenses = pgTable(
 );
 
 export const transferKinds = ["category", "savings", "external"] as const;
-export const transferReasons = ["cover", "month_close", "manual"] as const;
+export const transferReasons = ["cover", "month_close", "manual", "income"] as const;
 
 export const transfers = pgTable(
   "transfers",
@@ -165,7 +168,7 @@ export const transfers = pgTable(
     check("transfers_amount_positive", sql`amount > 0`),
     check("transfers_from_kind", sql`from_kind in ('category', 'savings', 'external')`),
     check("transfers_to_kind", sql`to_kind in ('category', 'savings', 'external')`),
-    check("transfers_reason", sql`reason in ('cover', 'month_close', 'manual')`),
+    check("transfers_reason", sql`reason in ('cover', 'month_close', 'manual', 'income')`),
     check("transfers_from_category", sql`(from_kind = 'category') = (from_category_id is not null)`),
     check("transfers_to_category", sql`(to_kind = 'category') = (to_category_id is not null)`),
     check(
@@ -181,7 +184,10 @@ export const transfers = pgTable(
   ],
 );
 
-/** Expected income for a month, line by line (salary, commission, …). */
+/**
+ * Income for a month, line by line. "expected" lines are part of the plan only;
+ * marking one received deposits it into Savings through a linked transfer.
+ */
 export const incomes = pgTable(
   "incomes",
   {
@@ -191,10 +197,18 @@ export const incomes = pgTable(
       .references(() => months.id),
     source: text().notNull(),
     amount: money().notNull(),
+    status: text({ enum: ["expected", "received"] }).notNull().default("expected"),
+    receivedOn: date({ mode: "string" }),
+    transferId: uuid().references(() => transfers.id),
     sortOrder: integer().notNull().default(0),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [check("incomes_amount_positive", sql`amount > 0`), index("incomes_month_idx").on(t.monthId)],
+  (t) => [
+    check("incomes_amount_positive", sql`amount > 0`),
+    check("incomes_status", sql`status in ('expected', 'received')`),
+    check("incomes_received", sql`(status = 'received') = (transfer_id is not null and received_on is not null)`),
+    index("incomes_month_idx").on(t.monthId),
+  ],
 );
 
 // ---- Derived views (created in drizzle/0001_views_triggers.sql) ----

@@ -3,6 +3,7 @@ import { Download, Plus } from "lucide-react";
 import { MonthHeader } from "@/components/page-header";
 import { ColumnChart } from "@/components/charts/column-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
+import { PlanBand } from "@/components/income/plan-band";
 import type { getDashboard } from "@/server/queries";
 import { formatMonth } from "@/lib/dates";
 import { formatAmount, formatMoney } from "@/lib/money";
@@ -26,7 +27,6 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
       ? [{ name: spent.length > top.length ? (totals.uncategorized ? "Other + needs category" : "Other") : "Needs category", value: rest, color: "var(--faint)" }]
       : []),
   ];
-  const unallocated = data.incomeTotal - totals.allocated;
   const weekPace = Math.round((data.evenPacePerDay * 7) / 100) * 100; // whole rupees
   const closed = data.month?.status === "closed";
 
@@ -58,33 +58,7 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
         </div>
       ) : (
         <>
-          {data.income.length > 0 ? (
-            <section className="card flex flex-wrap items-center gap-x-8 gap-y-3 px-5 py-4" aria-label="Income">
-              <Figure label="Income" value={formatMoney(data.incomeTotal, currency)} />
-              <span aria-hidden className="text-xl text-faint">−</span>
-              <Figure label="Budgeted" value={formatMoney(totals.allocated, currency)} />
-              <span aria-hidden className="text-xl text-faint">=</span>
-              <Figure
-                label={unallocated < 0 ? "Over-budgeted" : "Unallocated"}
-                value={formatMoney(Math.abs(unallocated), currency)}
-                className={unallocated < 0 ? "text-bad" : "text-ok"}
-              />
-              <ul className="ml-auto flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-muted-ink">
-                {data.income.map((i) => (
-                  <li key={i.id}>
-                    {i.source} <span className="font-semibold text-ink">{formatAmount(i.amount)}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : (
-            <p className="-mt-2 text-[13px] text-muted-ink">
-              No income recorded for {formatMonth(data.ym, { month: "long" })}.{" "}
-              <Link href={`/setup?month=${data.ym}`} className="font-semibold text-teal underline">
-                Add it in Setup
-              </Link>
-            </p>
-          )}
+          <PlanBand ym={data.ym} plan={data.plan} income={data.income} currency={currency} readOnly={closed} />
 
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Tile label="Allocated" value={formatMoney(totals.allocated, currency)} sub={`${data.summaries.length} categories`} />
@@ -235,11 +209,3 @@ function Tile({ label, value, sub, valueClass }: { label: string; value: string;
   );
 }
 
-function Figure({ label, value, className }: { label: string; value: string; className?: string }) {
-  return (
-    <div className="flex flex-col">
-      <span className="text-[13px] text-muted-ink">{label}</span>
-      <span className={cn("font-display text-xl font-semibold", className)}>{value}</span>
-    </div>
-  );
-}

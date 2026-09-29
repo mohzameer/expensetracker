@@ -2,12 +2,12 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Archive, Lock, Plus, Undo2, X } from "lucide-react";
+import { Archive, Check, Lock, Plus, Undo2, X } from "lucide-react";
 import { MonthHeader } from "@/components/page-header";
 import { saveSetupAction } from "@/server/actions";
 import type { getSetupPage } from "@/server/queries";
-import { formatMonth } from "@/lib/dates";
-import { formatMoney, parseMoney, toInputValue } from "@/lib/money";
+import { formatDay, formatMonth } from "@/lib/dates";
+import { formatAmount, formatMoney, parseMoney, toInputValue } from "@/lib/money";
 import { CATEGORY_COLORS } from "@/lib/palette";
 import { cn } from "@/lib/utils";
 
@@ -61,7 +61,9 @@ function initialState(data: Data): CatState[] {
 }
 
 function initialIncomes(data: Data): IncomeState[] {
-  return data.incomes.map((i, n) => ({ key: `inc-${n}`, source: i.source, amount: toInputValue(i.amount) }));
+  return data.incomes
+    .filter((i) => i.status === "expected")
+    .map((i, n) => ({ key: `inc-${n}`, source: i.source, amount: toInputValue(i.amount) }));
 }
 
 const field = "min-h-10 w-full rounded-[10px] border border-line-strong bg-surface px-2.5 text-[15px] outline-none focus:border-teal disabled:bg-paper";
@@ -72,6 +74,9 @@ export function SetupForm({ data }: { data: Data }) {
   const [cats, setCats] = useState<CatState[]>(initial);
   const initialInc = useMemo(() => initialIncomes(data), [data]);
   const [incomes, setIncomes] = useState<IncomeState[]>(initialInc);
+  const receivedLines = data.incomes.filter((i) => i.status === "received");
+  const initialDefault = { source: data.defaultIncome.source, amount: toInputValue(data.defaultIncome.amount) };
+  const [defaultIncome, setDefaultIncome] = useState(initialDefault);
   const [defaultAlert, setDefaultAlert] = useState(String(data.defaultAlertPct));
   const [currency, setCurrency] = useState(`${data.currencySymbol}|${data.currencyCode}`);
   const [pending, start] = useTransition();
@@ -88,6 +93,7 @@ export function SetupForm({ data }: { data: Data }) {
   const dirty =
     JSON.stringify(cats) !== JSON.stringify(initial) ||
     JSON.stringify(incomes) !== JSON.stringify(initialInc) ||
+    JSON.stringify(defaultIncome) !== JSON.stringify(initialDefault) ||
     defaultAlert !== String(data.defaultAlertPct) ||
     currency !== `${data.currencySymbol}|${data.currencyCode}`;
 
@@ -113,9 +119,14 @@ export function SetupForm({ data }: { data: Data }) {
     items: live.reduce((a, c) => a + c.items.filter((i) => !i.removed).length, 0),
     monthly: live.reduce((a, c) => a + monthlyCommit(c), 0),
     allocated: live.reduce((a, c) => a + (parseMoney(c.allocation) ?? 0), 0),
-    income: incomes.reduce((a, i) => a + (parseMoney(i.amount) ?? 0), 0),
+    expected: incomes.reduce((a, i) => a + (parseMoney(i.amount) ?? 0), 0),
   };
-  const unallocated = totals.income - totals.allocated;
+  // Live version of the dashboard's plan: carried in + income − budgets = free after the month.
+  const plan = data.plan;
+  const freeAfter =
+    plan.kind === "plan"
+      ? plan.freeAfter - plan.expected + totals.expected - (plan.budgets - totals.allocated)
+      : null;
 
   const copyCaps = () => {
     const prev = data.prevAllocations;
@@ -149,6 +160,7 @@ export function SetupForm({ data }: { data: Data }) {
         currencySymbol: symbol,
         currencyCode: code,
         incomes: incomeLines.map((i) => ({ source: i.source, amount: parseMoney(i.amount)! })),
+        defaultIncome: { source: defaultIncome.source, amount: parseMoney(defaultIncome.amount) || null },
         categories: cats
           .filter((c) => c.id || !c.removed)
           .map((c) => ({
@@ -233,15 +245,26 @@ export function SetupForm({ data }: { data: Data }) {
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-[17px] font-semibold">Income · {monthName}</h2>
             <span className="text-[13px] text-muted-ink">
-              Expected income for the month. What isn&apos;t budgeted shows as unallocated.
+              Income goes into Savings, which pays for the budgets. Mark lines received on the Dashboard when the money arrives.
             </span>
           </div>
+          {receivedLines.length > 0 && (
+            <ul className="flex flex-wrap gap-2">
+              {receivedLines.map((i) => (
+                <li key={i.id} className="flex min-h-9 items-center gap-2 rounded-full bg-ok-bg/70 px-3 text-sm">
+                  <Check aria-label="Received" className="size-4 text-ok" strokeWidth={2.5} />
+                  {i.source} <b>{formatAmount(i.amount)}</b>
+                  <span className="text-xs text-muted-ink">received {i.receivedOn ? formatDay(i.receivedOn, { day: "numeric", month: "short" }) : ""}</span>
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="grid gap-x-6 gap-y-2 md:grid-cols-2">
             {incomes.map((i) => (
               <div key={i.key} className="grid grid-cols-[minmax(0,1fr)_150px_40px] items-center gap-2.5">
                 <input
                   aria-label="Income source"
-                  placeholder="Source, e.g. Salary"
+                  placeholder="Expected, e.g. Salary"
                   autoFocus={!i.source && !i.amount}
                   value={i.source}
                   onChange={(e) => setIncomes((xs) => xs.map((x) => (x.key === i.key ? { ...x, source: e.target.value } : x)))}
@@ -274,17 +297,30 @@ export function SetupForm({ data }: { data: Data }) {
             >
               <Plus aria-hidden className="size-4" /> Add income
             </button>
-            {incomes.length > 0 && (
-              <span className="text-sm">
-                Total <b>{formatMoney(totals.income, symbol)}</b>
-              </span>
-            )}
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <label htmlFor="def-src" className="text-muted-ink">Every new month expects</label>
+              <input
+                id="def-src"
+                aria-label="Default income source"
+                value={defaultIncome.source}
+                onChange={(e) => setDefaultIncome({ ...defaultIncome, source: e.target.value })}
+                className={cn(field, "w-36")}
+              />
+              <input
+                aria-label="Default income amount"
+                inputMode="decimal"
+                placeholder="none"
+                value={defaultIncome.amount}
+                onChange={(e) => setDefaultIncome({ ...defaultIncome, amount: e.target.value })}
+                className={cn(field, "w-32 text-right")}
+              />
+            </div>
           </div>
         </fieldset>
       )}
 
       {!missing && (
-        <fieldset disabled={readOnly || pending} className="m-0 grid min-w-0 items-start gap-4 border-0 p-0 lg:grid-cols-2">
+        <fieldset disabled={readOnly || pending} className="m-0 grid min-w-0 items-start gap-4 border-0 p-0 xl:grid-cols-2">
           <legend className="sr-only">Categories</legend>
           {cats.map((c) => {
             const commit = monthlyCommit(c);
@@ -440,13 +476,8 @@ export function SetupForm({ data }: { data: Data }) {
           <Stat label="Items" value={String(totals.items)} />
           <Stat label="Monthly commitments" value={formatMoney(totals.monthly, symbol)} />
           <Stat label="Total allocated" value={formatMoney(totals.allocated, symbol)} strong />
-          {totals.income > 0 && <Stat label="Income" value={formatMoney(totals.income, symbol)} />}
-          {totals.income > 0 && (
-            <Stat
-              label={unallocated < 0 ? "Over-budgeted" : "Unallocated"}
-              value={formatMoney(Math.abs(unallocated), symbol)}
-              tone={unallocated < 0 ? "bad" : "ok"}
-            />
+          {freeAfter !== null && (
+            <Stat label={`Free after ${monthName}`} value={formatMoney(freeAfter, symbol)} tone={freeAfter < 0 ? "bad" : "ok"} />
           )}
         </dl>
         {!readOnly && (
@@ -457,6 +488,7 @@ export function SetupForm({ data }: { data: Data }) {
               onClick={() => {
                 setCats(initial);
                 setIncomes(initialInc);
+                setDefaultIncome(initialDefault);
                 setDefaultAlert(String(data.defaultAlertPct));
                 setCurrency(`${data.currencySymbol}|${data.currencyCode}`);
               }}

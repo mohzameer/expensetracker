@@ -1,7 +1,7 @@
 import { and, asc, count, desc, eq, gte, isNull, lt } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { categories, categoryBudgets, categoryMonthSummary, expenses, incomes, months, settings, transfers } from "@/db/schema";
-import { firstDay, formatDay, formatMonth, lastDay, nextMonthStart } from "@/lib/dates";
+import { addMonths, firstDay, formatDay, formatMonth, lastDay, nextMonthStart } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { UserError } from "@/lib/errors";
 
@@ -21,7 +21,8 @@ export async function getMonth(db: Db, ym: string): Promise<Month | null> {
 
 /**
  * Return the month row, creating it on first write. A new month copies the
- * allocations (not leftovers), alert % and income lines of the latest earlier month.
+ * allocations (not leftovers) and alert % of the latest earlier month, and starts
+ * with the default expected income line (e.g. salary) when one is set.
  */
 export async function ensureMonth(db: Db, ym: string): Promise<Month> {
   const existing = await getMonth(db, ym);
@@ -55,13 +56,8 @@ export async function ensureMonth(db: Db, ym: string): Promise<Month> {
         })),
       );
     }
-    const prevIncomes = source
-      ? await tx.select().from(incomes).where(eq(incomes.monthId, source.id)).orderBy(asc(incomes.sortOrder))
-      : [];
-    if (prevIncomes.length) {
-      await tx.insert(incomes).values(
-        prevIncomes.map((i) => ({ monthId: month.id, source: i.source, amount: i.amount, sortOrder: i.sortOrder })),
-      );
+    if (s.defaultIncomeAmount) {
+      await tx.insert(incomes).values({ monthId: month.id, source: s.defaultIncomeSource, amount: s.defaultIncomeAmount });
     }
     return month;
   });
@@ -150,7 +146,20 @@ export async function closeMonth(db: Db, ym: string, todayStr: string) {
         })),
       );
     }
+    // Income still expected (e.g. an unclaimed insurance payout) moves to next month.
+    const pending = await tx
+      .select({ id: incomes.id })
+      .from(incomes)
+      .where(and(eq(incomes.monthId, month.id), eq(incomes.status, "expected")));
+    if (pending.length) {
+      const next = await ensureMonth(tx, addMonths(ym, 1));
+      await tx
+        .update(incomes)
+        .set({ monthId: next.id })
+        .where(and(eq(incomes.monthId, month.id), eq(incomes.status, "expected")));
+    }
+
     await tx.update(months).set({ status: "closed", closedAt: new Date() }).where(eq(months.id, month.id));
-    return { swept: sweeps.reduce((a, s) => a + s.remaining, 0) };
+    return { swept: sweeps.reduce((a, s) => a + s.remaining, 0), movedIncome: pending.length };
   });
 }

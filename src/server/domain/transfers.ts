@@ -1,14 +1,25 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, lte, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { categoryMonthSummary, savingsBalance, settings, transfers } from "@/db/schema";
+import { categoryBudgets, categoryMonthSummary, months, savingsBalance, settings, transfers } from "@/db/schema";
 import { clampToMonth, currentYearMonth, monthOf } from "@/lib/dates";
 import { UserError } from "@/lib/errors";
 import { formatMoney } from "@/lib/money";
 import { assertOpen, lockMonth } from "./months";
 
-export async function getSavingsBalance(db: Db): Promise<number> {
+/**
+ * Free savings: everything that came into Savings (income, deposits, month-end
+ * leftovers) minus what went out (covers, withdrawals) minus the budgets of every
+ * month up to `ym` — budgets are paid out of Savings. A closed month nets out to
+ * minus what was actually spent.
+ */
+export async function getSavingsBalance(db: Db, ym: string = currentYearMonth()): Promise<number> {
   const [row] = await db.select().from(savingsBalance);
-  return row?.balance ?? 0;
+  const [committed] = await db
+    .select({ total: sql<number>`coalesce(sum(${categoryBudgets.allocation}), 0)::bigint`.mapWith(Number) })
+    .from(categoryBudgets)
+    .innerJoin(months, eq(months.id, categoryBudgets.monthId))
+    .where(lte(months.yearMonth, ym));
+  return (row?.balance ?? 0) - (committed?.total ?? 0);
 }
 
 /** Serialise everything that spends Savings (it spans months). */
@@ -50,8 +61,8 @@ export async function moveToCategory(
       }
     } else {
       await lockSavings(tx);
-      const balance = await getSavingsBalance(tx);
-      if (balance < input.amount) throw new UserError(`Savings only has ${formatMoney(balance)}.`);
+      const balance = await getSavingsBalance(tx, monthOf(input.todayStr));
+      if (balance < input.amount) throw new UserError(`Savings only has ${formatMoney(Math.max(balance, 0))} free.`);
     }
 
     const [row] = await tx
@@ -83,8 +94,8 @@ export async function adjustSavings(
     assertOpen(month);
     await lockSavings(tx);
     if (input.direction === "out") {
-      const balance = await getSavingsBalance(tx);
-      if (balance < input.amount) throw new UserError(`Savings only has ${formatMoney(balance)}.`);
+      const balance = await getSavingsBalance(tx, ym);
+      if (balance < input.amount) throw new UserError(`Savings only has ${formatMoney(Math.max(balance, 0))} free.`);
     }
     const [row] = await tx
       .insert(transfers)

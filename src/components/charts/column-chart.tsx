@@ -32,7 +32,7 @@ export function ColumnChart({
             axisLine={{ stroke: "var(--line-strong)" }}
             tick={{ fill: "var(--muted-ink)", fontSize: 13 }}
           />
-          <YAxis hide domain={[Math.min(0, ...data.map((d) => d.value)), max * 1.1]} />
+          <YAxis hide domain={[Math.min(0, ...data.map((d) => d.value)) * 1.15, max * 1.1]} />
           <Tooltip
             cursor={{ fill: "var(--line-soft)" }}
             content={({ active, payload }) => {
@@ -62,9 +62,17 @@ export function ColumnChart({
             ))}
             <LabelList
               dataKey="value"
-              position="top"
-              formatter={(v) => formatAmount(Number(v))}
-              style={{ fill: "var(--ink)", fontSize: 13, fontWeight: 600 }}
+              content={(p) => {
+                const { x = 0, y = 0, width = 0, height = 0, value } = p as { x?: number; y?: number; width?: number; height?: number; value?: number };
+                const v = Number(value);
+                // Above positive bars, below negative ones — never on the axis.
+                const ty = v < 0 ? Number(y) + Math.abs(Number(height)) + 16 : Number(y) - 6;
+                return (
+                  <text x={Number(x) + Number(width) / 2} y={ty} textAnchor="middle" fill="var(--ink)" fontSize={13} fontWeight={600}>
+                    {formatAmount(v)}
+                  </text>
+                );
+              }}
             />
           </Bar>
         </BarChart>

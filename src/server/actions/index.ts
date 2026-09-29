@@ -10,6 +10,7 @@ import { createCategory, createItem, saveSetup } from "@/server/domain/catalog";
 import { assignCategory, createExpense, deleteExpense, updateExpense } from "@/server/domain/expenses";
 import { closeMonth } from "@/server/domain/months";
 import { adjustSavings, moveToCategory } from "@/server/domain/transfers";
+import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
 
 // ---- auth ----
 
@@ -77,4 +78,14 @@ export async function adjustSavingsAction(input: z.input<typeof s.savingsAdjustI
 
 export async function closeMonthAction(ym: string) {
   return runAction(s.yearMonth, ym, (db, d) => closeMonth(db, d, today()));
+}
+
+// ---- income ----
+
+export async function receiveIncomeAction(id: string) {
+  return runAction(s.id, id, (db, d) => receiveIncome(db, d, today()));
+}
+
+export async function undoReceiveIncomeAction(id: string) {
+  return runAction(s.id, id, (db, d) => undoReceiveIncome(db, d));
 }

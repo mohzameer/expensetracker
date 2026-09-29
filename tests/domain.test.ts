@@ -4,6 +4,7 @@ import type { Db } from "@/db/client";
 import { categoryBudgets, categoryMonthSummary, expenses, incomes, monthlyItemStatus, months } from "@/db/schema";
 import { closeBlockers, closeMonth, ensureMonth, getMonth } from "@/server/domain/months";
 import { adjustSavings, getSavingsBalance, moveToCategory } from "@/server/domain/transfers";
+import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
 import { assignCategory, updateExpense } from "@/server/domain/expenses";
 import { createItem, removeCategory, saveSetup } from "@/server/domain/catalog";
 import { freshDb, rs, seedSeptember } from "./helpers";
@@ -74,11 +75,13 @@ describe("covers", () => {
     ).rejects.toThrow(/Only Rs 500/);
     await expect(
       moveToCategory(db, { ym: "2026-09", toCategoryId: s.dining.id, source: { kind: "savings" }, amount: rs(1000), todayStr: "2026-09-29" }),
-    ).rejects.toThrow(/Savings only has Rs 0/);
+    ).rejects.toThrow(/Savings only has Rs 0 free/);
 
-    await adjustSavings(db, { direction: "in", amount: rs(5000), note: "Starting balance", todayStr: "2026-09-29" });
+    // Budgets are paid out of Savings: 65,000 in − 60,000 of September caps = 5,000 free.
+    await adjustSavings(db, { direction: "in", amount: rs(65000), note: "Starting balance", todayStr: "2026-09-29" });
+    expect(await getSavingsBalance(db, "2026-09")).toBe(rs(5000));
     await moveToCategory(db, { ym: "2026-09", toCategoryId: s.dining.id, source: { kind: "savings" }, amount: rs(1000), todayStr: "2026-09-29" });
-    expect(await getSavingsBalance(db)).toBe(rs(4000));
+    expect(await getSavingsBalance(db, "2026-09")).toBe(rs(4000));
     expect((await summary("2026-09", s.dining.id)).remaining).toBe(0);
   });
 });
@@ -137,7 +140,8 @@ describe("month close", () => {
     const { swept } = await closeMonth(db, "2026-09", "2026-09-30");
     // Groceries 30,000 − 17,600 − 780 − 1,350 + Utilities 18,000 + Dining 0
     expect(swept).toBe(rs(10270 + 18000));
-    expect(await getSavingsBalance(db)).toBe(rs(28270));
+    // Budgets came out of Savings and leftovers went back: net effect is minus what was spent.
+    expect(await getSavingsBalance(db, "2026-09")).toBe(-rs(17600 + 780 + 13350));
     expect((await getMonth(db, "2026-09"))!.status).toBe("closed");
     const g = await summary("2026-09", s.groceries.id);
     expect(g.swept).toBe(rs(10270));
@@ -213,28 +217,50 @@ describe("setup", () => {
 });
 
 describe("income", () => {
-  const setup = (ym: string, incomesList: { source: string; amount: number }[]) =>
-    saveSetup(db, { ym, defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR", categories: [], incomes: incomesList });
+  const setup = (ym: string, incomesList: { source: string; amount: number }[], defaultIncome?: { source: string; amount: number | null }) =>
+    saveSetup(db, { ym, defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR", categories: [], incomes: incomesList, defaultIncome });
+  const lines = async (ym: string) => {
+    const m = (await getMonth(db, ym))!;
+    return db.select().from(incomes).where(eq(incomes.monthId, m.id));
+  };
 
-  it("is saved per month, copied into a new month, and replaced on save", async () => {
+  it("new months start with the default income only, nothing copied", async () => {
     await seedSeptember(db);
-    await setup("2026-09", [{ source: "Salary", amount: rs(653400) }, { source: "Com", amount: rs(566000) }]);
+    await setup("2026-09", [{ source: "Insurance claim", amount: rs(300000) }], { source: "Salary", amount: rs(1089000) });
     await ensureMonth(db, "2026-10");
-    const oct = (await getMonth(db, "2026-10"))!;
-    const rows = await db.select().from(incomes).where(eq(incomes.monthId, oct.id));
-    expect(rows.map((r) => [r.source, r.amount])).toEqual([["Salary", rs(653400)], ["Com", rs(566000)]]);
-
-    await setup("2026-10", [{ source: "Salary", amount: rs(700000) }]);
-    const after = await db.select().from(incomes).where(eq(incomes.monthId, oct.id));
-    expect(after.map((r) => r.amount)).toEqual([rs(700000)]);
+    expect((await lines("2026-10")).map((r) => [r.source, r.amount, r.status])).toEqual([["Salary", rs(1089000), "expected"]]);
   });
 
-  it("is read-only once the month is closed", async () => {
+  it("counts in Savings only once received, and can be undone", async () => {
+    await seedSeptember(db); // 60,000 of September budgets
+    await setup("2026-09", [{ source: "Com", amount: rs(566000) }, { source: "Insurance", amount: rs(300000) }]);
+    expect(await getSavingsBalance(db, "2026-09")).toBe(-rs(60000));
+
+    const [com] = (await lines("2026-09")).filter((r) => r.source === "Com");
+    await receiveIncome(db, com.id, "2026-09-29");
+    expect(await getSavingsBalance(db, "2026-09")).toBe(rs(566000 - 60000));
+    await expect(receiveIncome(db, com.id, "2026-09-29")).rejects.toThrow(/already/);
+
+    // Saving Setup again replaces expected lines but keeps the received one.
+    await setup("2026-09", [{ source: "Insurance", amount: rs(250000) }]);
+    expect((await lines("2026-09")).map((r) => [r.source, r.status]).sort()).toEqual([["Com", "received"], ["Insurance", "expected"]]);
+
+    await undoReceiveIncome(db, com.id);
+    expect(await getSavingsBalance(db, "2026-09")).toBe(-rs(60000));
+  });
+
+  it("still expected at month close moves to the next month; received stays and is locked", async () => {
     await seedSeptember(db);
-    await setup("2026-09", [{ source: "Salary", amount: rs(1000) }]);
-    await closeMonth(db, "2026-09", "2026-10-01");
-    await expect(setup("2026-09", [])).rejects.toThrow(/closed/);
-    await expect(db.delete(incomes)).rejects.toThrow();
+    await setup("2026-09", [{ source: "Com", amount: rs(566000) }, { source: "Insurance", amount: rs(300000) }]);
+    const [com] = (await lines("2026-09")).filter((r) => r.source === "Com");
+    await receiveIncome(db, com.id, "2026-09-29");
+
+    const res = await closeMonth(db, "2026-09", "2026-10-01");
+    expect(res.movedIncome).toBe(1);
+    expect((await lines("2026-09")).map((r) => r.source)).toEqual(["Com"]);
+    expect((await lines("2026-10")).map((r) => r.source)).toContain("Insurance");
+    await expect(undoReceiveIncome(db, com.id)).rejects.toThrow(/closed/);
+    await expect(db.delete(incomes).where(eq(incomes.id, com.id))).rejects.toThrow();
   });
 });
 

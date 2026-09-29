@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 type Data = Awaited<ReturnType<typeof getSavingsPage>>;
 type Ledger = Data["ledger"];
 
-const TYPE: Record<string, string> = { month_close: "Month close", cover: "Cover", manual: "Manual" };
+const TYPE: Record<string, string> = { month_close: "Month close", cover: "Cover", manual: "Manual", income: "Income" };
 
 /** One row per month-close sweep (the per-category rows are summed). */
 function groupLedger(rows: Ledger) {
@@ -56,11 +56,26 @@ export function SavingsView({ data }: { data: Data }) {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-col gap-1.5">
           <h1 className="font-display text-3xl font-semibold">Savings</h1>
-          <span className="text-sm text-muted-ink">Leftovers swept in at month close. Covers for overspending come out of here.</span>
+          <span className="text-sm text-muted-ink">
+            Your money pool. Income comes in, each month&apos;s budgets are paid out of it, and leftovers come back at month close.
+          </span>
         </div>
         <div className="flex flex-col items-end gap-0.5">
-          <span className="text-[13px] text-muted-ink">Balance</span>
-          <span className="font-display text-[40px] leading-tight font-semibold text-teal">{formatMoney(data.balance, data.currency)}</span>
+          <span className="text-[13px] text-muted-ink">Free</span>
+          <span className={cn("font-display text-[40px] leading-tight font-semibold", data.balance < 0 ? "text-bad" : "text-teal")}>
+            {formatMoney(data.balance, data.currency)}
+          </span>
+          {data.setAside > 0 && (
+            <span className="text-[13px] text-muted-ink">
+              {formatMoney(data.balance + data.setAside, data.currency)} in Savings · {formatMoney(data.setAside, data.currency)} set aside for{" "}
+              {formatMonth(data.ym, { month: "long" })}&apos;s budgets
+            </span>
+          )}
+          {data.expected.length > 0 && (
+            <span className="text-[13px] text-muted-ink">
+              Expected: {data.expected.map((e) => `${e.source} ${formatAmount(e.amount)}`).join(" · ")}
+            </span>
+          )}
         </div>
       </div>
 
@@ -76,12 +91,12 @@ export function SavingsView({ data }: { data: Data }) {
                 label: formatMonth(m.yearMonth, { month: "short" }),
                 value: m.net,
                 muted: m.status === "open",
-                detail: m.status === "open" ? "Still open" : `Swept in ${formatAmount(m.sweptIn)}`,
+                detail: m.status === "open" ? `Still open · income ${formatAmount(m.income)}` : `Income ${formatAmount(m.income)} · returned ${formatAmount(m.sweptIn)}`,
               }))}
             />
           )}
           <span className="text-[13px] text-muted-ink">
-            Sweep in minus covers taken out that month.{openMonth ? ` ${formatMonth(openMonth.yearMonth, { month: "long" })} is still open.` : ""}
+            Income minus what was spent that month.{openMonth ? ` ${formatMonth(openMonth.yearMonth, { month: "long" })} is still open, so it shows income minus its budgets.` : ""}
           </span>
         </section>
 
@@ -165,7 +180,7 @@ function MoveSheet({ data, onClose }: { data: Data; onClose: () => void }) {
         </select>
       </div>
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="mv-amt" className={labelCls}>Amount · {formatMoney(data.balance, data.currency)} available</label>
+        <label htmlFor="mv-amt" className={labelCls}>Amount · {formatMoney(Math.max(data.balance, 0), data.currency)} free</label>
         <input id="mv-amt" inputMode="decimal" className={inputCls} value={amount} onChange={(e) => setAmount(e.target.value)} />
       </div>
       <button

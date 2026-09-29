@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, gte, isNull, lt, ne, or, sql, sum } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lt, lte, ne, or, sql, sum } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@/db";
 import { categories, categoryBudgets, categoryMonthSummary, expenses, incomes, items, monthlyItemStatus, months, transfers } from "@/db/schema";
@@ -218,19 +218,67 @@ export async function getInbox(db: Db) {
   return { rows, summariesByMonth, catalog: await getCatalog(db), currency: settings.currencySymbol };
 }
 
-export async function getIncomes(db: Db, month: Month | null) {
+export type IncomeLine = { id: string; source: string; amount: number; status: "expected" | "received"; receivedOn: string | null };
+
+export async function getIncomes(db: Db, month: Month | null): Promise<IncomeLine[]> {
   if (!month) return [];
   return db
-    .select({ id: incomes.id, source: incomes.source, amount: incomes.amount })
+    .select({ id: incomes.id, source: incomes.source, amount: incomes.amount, status: incomes.status, receivedOn: incomes.receivedOn })
     .from(incomes)
     .where(eq(incomes.monthId, month.id))
     .orderBy(asc(incomes.sortOrder), asc(incomes.createdAt));
 }
 
+export type MonthPlan =
+  | { kind: "plan"; carriedIn: number; received: number; expected: number; budgets: number; freeAfter: number }
+  | { kind: "actual"; received: number; spent: number; returned: number };
+
+/**
+ * Your sheet's view of a month: money carried in + income − budgets = free after
+ * the month (assuming budgets are fully spent). Past months report actuals instead.
+ */
+export async function getMonthPlan(db: Db, ym: string): Promise<MonthPlan> {
+  const cur = currentYearMonth();
+  const incomeRows = await db
+    .select({ yearMonth: months.yearMonth, status: incomes.status, amount: incomes.amount })
+    .from(incomes)
+    .innerJoin(months, eq(months.id, incomes.monthId))
+    .where(lte(months.yearMonth, ym));
+  const received = incomeRows.filter((r) => r.yearMonth === ym && r.status === "received").reduce((a, r) => a + r.amount, 0);
+
+  if (ym < cur) {
+    const month = await getMonth(db, ym);
+    const summaries = await getSummaries(db, month);
+    return {
+      kind: "actual",
+      received,
+      spent: summaries.reduce((a, x) => a + x.spent, 0),
+      returned: summaries.reduce((a, x) => a + x.swept, 0),
+    };
+  }
+
+  const budgetRows = await db
+    .select({ yearMonth: months.yearMonth, total: sql<number>`coalesce(sum(${categoryBudgets.allocation}), 0)::bigint`.mapWith(Number) })
+    .from(categoryBudgets)
+    .innerJoin(months, eq(months.id, categoryBudgets.monthId))
+    .where(and(gte(months.yearMonth, cur), lte(months.yearMonth, ym)))
+    .groupBy(months.yearMonth);
+  const budgetOf = (m: string) => budgetRows.find((b) => b.yearMonth === m)?.total ?? 0;
+
+  const savingsNow = await getSavingsBalance(db, cur); // already net of this month's budgets
+  const expectedToDate = incomeRows.filter((r) => r.status === "expected").reduce((a, r) => a + r.amount, 0);
+  const futureBudgets = budgetRows.filter((b) => b.yearMonth > cur).reduce((a, b) => a + b.total, 0);
+  const freeAfter = savingsNow + expectedToDate - futureBudgets;
+  const expected = incomeRows.filter((r) => r.yearMonth === ym && r.status === "expected").reduce((a, r) => a + r.amount, 0);
+  const budgets = budgetOf(ym);
+  return { kind: "plan", carriedIn: freeAfter - received - expected + budgets, received, expected, budgets, freeAfter };
+}
+
 export async function getDashboard(db: Db, ym: string) {
   const month = await getMonth(db, ym);
-  const [income, settings, summaries, monthly, daily] = await Promise.all([
+  const [income, plan, settings, summaries, monthly, daily] = await Promise.all([
     getIncomes(db, month),
+    getMonthPlan(db, ym),
     getSettings(db),
     getSummaries(db, month),
     getMonthlyItems(db, month),
@@ -275,7 +323,7 @@ export async function getDashboard(db: Db, ym: string) {
     },
     owed,
     income,
-    incomeTotal: income.reduce((a, i) => a + i.amount, 0),
+    plan,
     weeks: weeks.map((w) => ({ label: w.label, total: w.total, days: w.to - w.from + 1 })),
     evenPacePerDay: days ? allocated / days : 0,
   };
@@ -284,9 +332,10 @@ export async function getDashboard(db: Db, ym: string) {
 export async function getSavingsPage(db: Db) {
   const fromCat = alias(categories, "from_cat");
   const toCat = alias(categories, "to_cat");
-  const [settings, balance, ledger, perMonth, catalog] = await Promise.all([
+  const cur = currentYearMonth();
+  const [settings, balance, ledger, perMonth, catalog, setAside, expected] = await Promise.all([
     getSettings(db),
-    getSavingsBalance(db),
+    getSavingsBalance(db, cur),
     db
       .select({
         id: transfers.id,
@@ -311,23 +360,43 @@ export async function getSavingsPage(db: Db) {
       .select({
         yearMonth: months.yearMonth,
         status: months.status,
-        net: sql<number>`coalesce(sum(case when ${transfers.toKind} = 'savings' then ${transfers.amount} when ${transfers.fromKind} = 'savings' then -${transfers.amount} else 0 end), 0)::bigint`.mapWith(Number),
+        // Income + leftovers returned − the month's budgets − covers taken from Savings.
+        // For a closed month that is simply income − spending. Manual adjustments don't count.
+        net: sql<number>`(coalesce(sum(case when ${transfers.toKind} = 'savings' then ${transfers.amount} when ${transfers.fromKind} = 'savings' then -${transfers.amount} else 0 end), 0)
+          - (select coalesce(sum(b.allocation), 0) from category_budgets b where b.month_id = ${months.id}))::bigint`.mapWith(Number),
+        income: sql<number>`coalesce(sum(${transfers.amount}) filter (where ${transfers.reason} = 'income'), 0)::bigint`.mapWith(Number),
         sweptIn: sql<number>`coalesce(sum(${transfers.amount}) filter (where ${transfers.reason} = 'month_close'), 0)::bigint`.mapWith(Number),
       })
       .from(months)
-      // Sweeps in minus money taken out for categories; manual deposits/withdrawals don't count as "saved".
       .leftJoin(
         transfers,
-        and(eq(transfers.monthId, months.id), ne(transfers.fromKind, "external"), ne(transfers.toKind, "external")),
+        and(
+          eq(transfers.monthId, months.id),
+          or(eq(transfers.reason, "income"), and(ne(transfers.fromKind, "external"), ne(transfers.toKind, "external"))),
+        ),
       )
-      .where(gte(months.yearMonth, addMonths(currentYearMonth(), -11)))
-      .groupBy(months.yearMonth, months.status)
+      .where(and(gte(months.yearMonth, addMonths(cur, -11)), lte(months.yearMonth, cur)))
+      .groupBy(months.id, months.yearMonth, months.status)
       .orderBy(asc(months.yearMonth)),
     getCatalog(db),
+    // This month's budgets, already taken out of the free balance.
+    db
+      .select({ total: sql<number>`coalesce(sum(${categoryBudgets.allocation}), 0)::bigint`.mapWith(Number) })
+      .from(categoryBudgets)
+      .innerJoin(months, eq(months.id, categoryBudgets.monthId))
+      .where(and(eq(months.yearMonth, cur), eq(months.status, "open"))),
+    db
+      .select({ source: incomes.source, amount: incomes.amount, yearMonth: months.yearMonth })
+      .from(incomes)
+      .innerJoin(months, eq(months.id, incomes.monthId))
+      .where(and(eq(incomes.status, "expected"), lte(months.yearMonth, addMonths(cur, 1))))
+      .orderBy(asc(months.yearMonth)),
   ]);
   return {
     currency: settings.currencySymbol,
     balance,
+    setAside: setAside[0]?.total ?? 0,
+    expected,
     ledger: ledger.map((l) => ({ ...l, signed: l.toKind === "savings" ? l.amount : -l.amount })),
     perMonth,
     categories: catalog.categories,
@@ -338,7 +407,8 @@ export async function getSavingsPage(db: Db) {
 export async function getClosePage(db: Db, ym: string) {
   const month = await getMonth(db, ym);
   const t = today();
-  const [settings, summaries, monthly, blockers, uncategorized, savings, catalog] = await Promise.all([
+  const [income, settings, summaries, monthly, blockers, uncategorized, savings, catalog] = await Promise.all([
+    getIncomes(db, month),
     getSettings(db),
     getSummaries(db, month),
     getMonthlyItems(db, month),
@@ -364,6 +434,7 @@ export async function getClosePage(db: Db, ym: string) {
     blockers,
     uncategorized: uncategorized as ExpenseRow[],
     savings,
+    pendingIncome: income.filter((i) => i.status === "expected"),
     categories: catalog.categories,
   };
 }
@@ -385,8 +456,9 @@ export async function getSetupPage(db: Db, ym: string) {
   const month = ym >= cur ? await ensureMonth(db, ym) : await getMonth(db, ym);
   const prevYm = addMonths(ym, -1);
   const prev = await getMonth(db, prevYm);
-  const [income, settings, catalog, budgets, prevBudgets] = await Promise.all([
+  const [income, plan, settings, catalog, budgets, prevBudgets] = await Promise.all([
     getIncomes(db, month),
+    getMonthPlan(db, ym),
     getSettings(db),
     getCatalog(db),
     month ? db.select().from(categoryBudgets).where(eq(categoryBudgets.monthId, month.id)) : [],
@@ -400,7 +472,9 @@ export async function getSetupPage(db: Db, ym: string) {
     currencySymbol: settings.currencySymbol,
     currencyCode: settings.currencyCode,
     defaultAlertPct: month?.defaultAlertPct ?? settings.defaultAlertPct,
-    incomes: income.map((i) => ({ source: i.source, amount: i.amount })),
+    incomes: income,
+    plan,
+    defaultIncome: { source: settings.defaultIncomeSource, amount: settings.defaultIncomeAmount },
     prevAllocations: Object.fromEntries(prevBudgets.map((b) => [b.categoryId, b.allocation])) as Record<string, number>,
     categories: catalog.categories.map((c) => ({
       id: c.id,

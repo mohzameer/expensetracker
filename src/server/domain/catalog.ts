@@ -123,8 +123,10 @@ export type SetupPayload = {
   currencySymbol: string;
   currencyCode: string;
   categories: SetupCategory[];
-  /** The month's full list of income lines (replaces what's there). Omit to leave income untouched. */
+  /** The month's expected income lines (replaces the expected ones; received lines are kept). Omit to leave income untouched. */
   incomes?: { source: string; amount: number }[];
+  /** Expected income every new month starts with; null amount turns it off. */
+  defaultIncome?: { source: string; amount: number | null };
 };
 
 /** Setup's single "Save all": everything in one transaction. */
@@ -136,11 +138,17 @@ export async function saveSetup(db: Db, p: SetupPayload) {
     await tx.update(settings).set({ currencySymbol: p.currencySymbol, currencyCode: p.currencyCode }).where(eq(settings.id, 1));
     await tx.update(months).set({ defaultAlertPct: p.defaultAlertPct }).where(eq(months.id, month.id));
 
+    if (p.defaultIncome) {
+      await tx
+        .update(settings)
+        .set({ defaultIncomeSource: p.defaultIncome.source.trim() || "Salary", defaultIncomeAmount: p.defaultIncome.amount })
+        .where(eq(settings.id, 1));
+    }
     if (p.incomes) {
-      await tx.delete(incomes).where(eq(incomes.monthId, month.id));
+      await tx.delete(incomes).where(and(eq(incomes.monthId, month.id), eq(incomes.status, "expected")));
       if (p.incomes.length) {
         await tx.insert(incomes).values(
-          p.incomes.map((i, n) => ({ monthId: month.id, source: i.source.trim(), amount: i.amount, sortOrder: n })),
+          p.incomes.map((i, n) => ({ monthId: month.id, source: i.source.trim(), amount: i.amount, sortOrder: 100 + n })),
         );
       }
     }
