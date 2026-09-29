@@ -108,6 +108,9 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
                 <h2 className="text-[17px] font-semibold">Weekly spend</h2>
                 <span className="text-[13px] text-muted-ink">Dashed line = even pace ({formatMoney(weekPace, currency)} / wk)</span>
               </div>
+              {totals.spent === 0 ? (
+                <p className="text-[15px] text-muted-ink">No spending yet.</p>
+              ) : (
               <ColumnChart
                 ariaLabel="Weekly spend"
                 height={260}
@@ -119,11 +122,20 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
                   detail: w.days < 7 ? `${w.days} days · pace ${formatAmount(Math.round(data.evenPacePerDay * w.days))}` : undefined,
                 }))}
               />
+              )}
             </section>
           </div>
 
           <section className="card flex flex-col gap-3 p-5 lg:px-6">
             <h2 className="text-[17px] font-semibold">Budget vs actual</h2>
+            {data.summaries.length === 0 && (
+              <p className="text-[15px] text-muted-ink">
+                No categories yet.{" "}
+                <Link href={`/setup?month=${data.ym}`} className="font-semibold text-teal underline">
+                  Set up {formatMonth(data.ym, { month: "long" })}
+                </Link>
+              </p>
+            )}
             <div className="grid gap-x-9 gap-y-3.5 text-sm sm:grid-cols-2 lg:grid-cols-3">
               {data.summaries.map((s) => {
                 const pct = s.effectiveAllocation > 0 ? Math.min((s.spent / s.effectiveAllocation) * 100, 100) : s.spent > 0 ? 100 : 0;
