@@ -56,6 +56,8 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
   const [categoryId, setCategoryId] = useState<string | null>(original?.categoryId ?? prefill?.categoryId ?? null);
   const [itemId, setItemId] = useState<string | null>(original?.itemId ?? prefill?.itemId ?? null);
   const [amountStr, setAmountStr] = useState(toInputValue(original?.amount ?? prefill?.amount ?? null));
+  // Once you type an amount (or are editing a saved one), picking an item no longer replaces it.
+  const [amountTyped, setAmountTyped] = useState(!!original);
   const [note, setNote] = useState(original?.note ?? "");
   const [newCategory, setNewCategory] = useState<{ name: string; allocation: string; alertPct: string } | null>(null);
   const [newItem, setNewItem] = useState<{ name: string; kind: "one_off" | "monthly"; amount: string } | null>(null);
@@ -108,17 +110,12 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryId, sameMonth, data.summaries, amount, original]);
 
+  // Amount defaults: a monthly item fills in its monthly amount; a one-off starts empty.
   const pickItem = (id: string | null) => {
     setItemId(id);
+    if (amountTyped) return;
     const it = items.find((i) => i.id === id);
-    if (!it) return;
-    if (it.kind === "monthly") {
-      const st = sameMonth ? paidFor(it.id) : undefined;
-      const owed = (it.expectedAmount ?? 0) - (st?.paid ?? 0);
-      setAmountStr(toInputValue(owed > 0 ? owed : it.expectedAmount));
-    } else if (it.defaultAmount) {
-      setAmountStr(toInputValue(it.defaultAmount));
-    }
+    setAmountStr(it?.kind === "monthly" ? toInputValue(it.expectedAmount) : "");
   };
 
   const createCategory = () => {
@@ -154,7 +151,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
       if (!res.ok) return void toast.error(res.error);
       setExtraItems((i) => [...i, res.data]);
       setItemId(res.data.id);
-      if (amt && !amountStr) setAmountStr(toInputValue(amt));
+      if (!amountTyped) setAmountStr(newItem.kind === "monthly" ? toInputValue(amt) : "");
       setNewItem(null);
     });
   };
@@ -201,6 +198,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
               setCategoryId(v);
               setItemId(null);
               setNewItem(null);
+              if (!amountTyped) setAmountStr(""); // drop an amount the previous item filled in
             }}
             onCreate={(name) => {
               setNewCategory({ name, allocation: "", alertPct: "" });
@@ -322,7 +320,10 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
               autoComplete="off"
               placeholder="0"
               value={amountStr}
-              onChange={(e) => setAmountStr(e.target.value.replace(/[^0-9.,]/g, ""))}
+              onChange={(e) => {
+                setAmountStr(e.target.value.replace(/[^0-9.,]/g, ""));
+                setAmountTyped(true);
+              }}
               className="w-24 min-w-0 flex-1 bg-transparent py-2.5 font-display text-[34px] font-semibold text-ink outline-none placeholder:text-line-strong"
             />
           </div>
