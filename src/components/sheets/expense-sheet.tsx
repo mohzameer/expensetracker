@@ -151,7 +151,9 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
       if (!res.ok) return void toast.error(res.error);
       setExtraItems((i) => [...i, res.data]);
       setItemId(res.data.id);
-      if (!amountTyped) setAmountStr(newItem.kind === "monthly" ? toInputValue(amt) : "");
+      // The amount you just gave the new item (monthly or one-off) becomes this entry's amount.
+      if (amt) setAmountStr(toInputValue(amt));
+      else if (!amountTyped) setAmountStr("");
       setNewItem(null);
     });
   };
@@ -296,7 +298,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
                 ))}
               </div>
               <div className="flex flex-col gap-1.5">
-                <label htmlFor="ni-amount" className={fieldLabel}>{newItem.kind === "monthly" ? "Expected each month" : "Usual amount (optional)"}</label>
+                <label htmlFor="ni-amount" className={fieldLabel}>{newItem.kind === "monthly" ? "Expected each month" : "Amount (optional)"}</label>
                 <input id="ni-amount" inputMode="decimal" className={inputBox} value={newItem.amount} onChange={(e) => setNewItem({ ...newItem, amount: e.target.value })} />
               </div>
               <div className="flex gap-2">
