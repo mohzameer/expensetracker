@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Check, ChevronLeft, ChevronRight, Lock, Plus } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Lock, Plus } from "lucide-react";
 import { ExpenseSheet, type ExpensePayload, type ExpenseSheetMode } from "@/components/sheets/expense-sheet";
 import { CoverSheet } from "@/components/sheets/cover-sheet";
 import { createExpenseAction, deleteExpenseAction, updateExpenseAction } from "@/server/actions";
@@ -27,6 +27,7 @@ export function DayView({ data }: { data: DayData }) {
   });
 
   const [sheet, setSheet] = useState<{ open: boolean; key: number; mode: ExpenseSheetMode }>({ open: false, key: 0, mode: { kind: "add" } });
+  const [dueOpen, setDueOpen] = useState(false);
   const [cover, setCover] = useState<{ open: boolean; key: number; categoryId: string | null }>({ open: false, key: 0, categoryId: null });
 
   const openSheet = (mode: ExpenseSheetMode) => setSheet((s) => ({ open: true, key: s.key + 1, mode }));
@@ -173,8 +174,29 @@ export function DayView({ data }: { data: DayData }) {
       <main className="flex flex-1 flex-col gap-[18px] px-4 pt-1 pb-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:px-0">
         {!closed && due.length > 0 && (
           <section className="flex flex-col gap-2 lg:order-2">
-            <h2 className="eyebrow">Due this month · {due.length}</h2>
-            <ul className="card flex flex-col divide-y divide-line-soft">
+            {/* Folded by default on phones so today's entries stay on screen; always open on desktop. */}
+            <h2 className="m-0">
+              <button
+                type="button"
+                aria-expanded={dueOpen}
+                aria-controls="due-list"
+                onClick={() => setDueOpen((o) => !o)}
+                className={cn(
+                  "flex w-full items-center gap-2 text-left lg:pointer-events-none",
+                  !dueOpen && "card min-h-12 px-3.5 lg:min-h-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:px-0",
+                )}
+              >
+                <span className="eyebrow flex-1">Due this month · {due.length}</span>
+                <span className={cn("text-sm font-semibold", dueOpen && "hidden", "lg:hidden")}>
+                  {formatMoney(due.reduce((a, d) => a + d.expected - d.paid, 0), data.currency)}
+                </span>
+                <ChevronDown
+                  aria-hidden
+                  className={cn("size-[18px] text-muted-ink transition-transform lg:hidden", dueOpen && "rotate-180")}
+                />
+              </button>
+            </h2>
+            <ul id="due-list" className={cn("card flex-col divide-y divide-line-soft", dueOpen ? "flex" : "hidden lg:flex")}>
               {due.map((d) => (
                 <DueRow
                   key={d.itemId}
