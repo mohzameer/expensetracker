@@ -18,7 +18,15 @@ export const expenseInput = z.object({
   itemId: id.nullable(),
   amount,
   note: z.string().trim().max(200).nullable(),
+  accountId: id.nullable(), // null only when editing an expense from before accounts existed
 });
+
+/** New expenses must say which account paid. */
+export const newExpenseInput = expenseInput.extend({ accountId: z.uuid("Choose which account paid") });
+
+export const newAccountInput = z.object({ name, opening: z.number().int().min(-1e13).max(1e13) });
+export const setBalanceInput = z.object({ accountId: id, actual: z.number().int().min(-1e13).max(1e13), note: z.string().trim().max(200).nullable() });
+export const accountTransferInput = z.object({ fromId: id, toId: id, amount, note: z.string().trim().max(200).nullable() });
 
 export const newCategoryInput = z.object({
   name,
@@ -83,6 +91,9 @@ export const setupInput = z.object({
       items: z.array(setupItem),
     }),
   ),
-  incomes: z.array(z.object({ source: z.string().trim().min(1, "Every income line needs a source").max(60), amount })).optional(),
+  incomes: z
+    .array(z.object({ source: z.string().trim().min(1, "Every income line needs a source").max(60), amount, accountId: id.nullable() }))
+    .optional(),
+  defaultAccountId: id.nullable().optional(),
   defaultIncome: z.object({ source: z.string().trim().max(60), amount: optionalAmount }).optional(),
 });

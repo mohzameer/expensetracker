@@ -1,0 +1,1394 @@
+{
+  "id": "29c15d79-3206-4805-b60b-33b3e37d4bfc",
+  "prevId": "4cc47e0a-c190-4790-b44b-68df34dcfa35",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.account_entries": {
+      "name": "account_entries",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_on": {
+          "name": "occurred_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "transfer_group": {
+          "name": "transfer_group",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "account_entries_account_idx": {
+          "name": "account_entries_account_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "occurred_on",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "account_entries_account_id_accounts_id_fk": {
+          "name": "account_entries_account_id_accounts_id_fk",
+          "tableFrom": "account_entries",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "tableTo": "accounts",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "account_entries_amount_nonzero": {
+          "name": "account_entries_amount_nonzero",
+          "value": "amount <> 0"
+        },
+        "account_entries_kind": {
+          "name": "account_entries_kind",
+          "value": "kind in ('opening', 'adjustment', 'transfer')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.accounts": {
+      "name": "accounts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "accounts_name_lower_idx": {
+          "name": "accounts_name_lower_idx",
+          "columns": [
+            {
+              "expression": "lower(name)",
+              "isExpression": true,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.categories": {
+      "name": "categories",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "color": {
+          "name": "color",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'#1F5F5B'"
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "categories_name_lower_idx": {
+          "name": "categories_name_lower_idx",
+          "columns": [
+            {
+              "expression": "lower(name)",
+              "isExpression": true,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.category_budgets": {
+      "name": "category_budgets",
+      "schema": "",
+      "columns": {
+        "month_id": {
+          "name": "month_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category_id": {
+          "name": "category_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "allocation": {
+          "name": "allocation",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "alert_pct": {
+          "name": "alert_pct",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "category_budgets_month_id_months_id_fk": {
+          "name": "category_budgets_month_id_months_id_fk",
+          "tableFrom": "category_budgets",
+          "columnsFrom": [
+            "month_id"
+          ],
+          "tableTo": "months",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "category_budgets_category_id_categories_id_fk": {
+          "name": "category_budgets_category_id_categories_id_fk",
+          "tableFrom": "category_budgets",
+          "columnsFrom": [
+            "category_id"
+          ],
+          "tableTo": "categories",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {
+        "category_budgets_month_id_category_id_pk": {
+          "name": "category_budgets_month_id_category_id_pk",
+          "columns": [
+            "month_id",
+            "category_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "category_budgets_allocation": {
+          "name": "category_budgets_allocation",
+          "value": "allocation >= 0"
+        },
+        "category_budgets_alert_pct": {
+          "name": "category_budgets_alert_pct",
+          "value": "alert_pct is null or alert_pct between 0 and 100"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.expenses": {
+      "name": "expenses",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "spent_on": {
+          "name": "spent_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category_id": {
+          "name": "category_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amount": {
+          "name": "amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "expenses_account_idx": {
+          "name": "expenses_account_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "expenses_spent_on_idx": {
+          "name": "expenses_spent_on_idx",
+          "columns": [
+            {
+              "expression": "spent_on",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "expenses_category_spent_on_idx": {
+          "name": "expenses_category_spent_on_idx",
+          "columns": [
+            {
+              "expression": "category_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "spent_on",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "expenses_item_spent_on_idx": {
+          "name": "expenses_item_spent_on_idx",
+          "columns": [
+            {
+              "expression": "item_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "spent_on",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "expenses_category_id_categories_id_fk": {
+          "name": "expenses_category_id_categories_id_fk",
+          "tableFrom": "expenses",
+          "columnsFrom": [
+            "category_id"
+          ],
+          "tableTo": "categories",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "expenses_account_id_accounts_id_fk": {
+          "name": "expenses_account_id_accounts_id_fk",
+          "tableFrom": "expenses",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "tableTo": "accounts",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "expenses_item_category_fk": {
+          "name": "expenses_item_category_fk",
+          "tableFrom": "expenses",
+          "columnsFrom": [
+            "item_id",
+            "category_id"
+          ],
+          "tableTo": "items",
+          "columnsTo": [
+            "id",
+            "category_id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "expenses_amount_positive": {
+          "name": "expenses_amount_positive",
+          "value": "amount > 0"
+        },
+        "expenses_item_needs_category": {
+          "name": "expenses_item_needs_category",
+          "value": "item_id is null or category_id is not null"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.incomes": {
+      "name": "incomes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "month_id": {
+          "name": "month_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'expected'"
+        },
+        "received_on": {
+          "name": "received_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "transfer_id": {
+          "name": "transfer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "incomes_month_idx": {
+          "name": "incomes_month_idx",
+          "columns": [
+            {
+              "expression": "month_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "incomes_month_id_months_id_fk": {
+          "name": "incomes_month_id_months_id_fk",
+          "tableFrom": "incomes",
+          "columnsFrom": [
+            "month_id"
+          ],
+          "tableTo": "months",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "incomes_transfer_id_transfers_id_fk": {
+          "name": "incomes_transfer_id_transfers_id_fk",
+          "tableFrom": "incomes",
+          "columnsFrom": [
+            "transfer_id"
+          ],
+          "tableTo": "transfers",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "incomes_account_id_accounts_id_fk": {
+          "name": "incomes_account_id_accounts_id_fk",
+          "tableFrom": "incomes",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "tableTo": "accounts",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "incomes_amount_positive": {
+          "name": "incomes_amount_positive",
+          "value": "amount > 0"
+        },
+        "incomes_status": {
+          "name": "incomes_status",
+          "value": "status in ('expected', 'received')"
+        },
+        "incomes_received": {
+          "name": "incomes_received",
+          "value": "(status = 'received') = (received_on is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.items": {
+      "name": "items",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "category_id": {
+          "name": "category_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expected_amount": {
+          "name": "expected_amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "default_amount": {
+          "name": "default_amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "month_id": {
+          "name": "month_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "items_category_name_month_idx": {
+          "name": "items_category_name_month_idx",
+          "columns": [
+            {
+              "expression": "category_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lower(name)",
+              "isExpression": true,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "coalesce(month_id, '00000000-0000-0000-0000-000000000000'::uuid)",
+              "isExpression": true,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "items_category_id_categories_id_fk": {
+          "name": "items_category_id_categories_id_fk",
+          "tableFrom": "items",
+          "columnsFrom": [
+            "category_id"
+          ],
+          "tableTo": "categories",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        },
+        "items_month_id_months_id_fk": {
+          "name": "items_month_id_months_id_fk",
+          "tableFrom": "items",
+          "columnsFrom": [
+            "month_id"
+          ],
+          "tableTo": "months",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "items_id_category_uq": {
+          "name": "items_id_category_uq",
+          "columns": [
+            "id",
+            "category_id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "items_kind": {
+          "name": "items_kind",
+          "value": "kind in ('monthly', 'one_off')"
+        },
+        "items_month_scope": {
+          "name": "items_month_scope",
+          "value": "(kind = 'one_off') = (month_id is not null)"
+        },
+        "items_monthly_expected": {
+          "name": "items_monthly_expected",
+          "value": "kind <> 'monthly' or expected_amount is not null"
+        },
+        "items_expected_positive": {
+          "name": "items_expected_positive",
+          "value": "expected_amount is null or expected_amount > 0"
+        },
+        "items_default_positive": {
+          "name": "items_default_positive",
+          "value": "default_amount is null or default_amount > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.months": {
+      "name": "months",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "year_month": {
+          "name": "year_month",
+          "type": "char(7)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "starts_on": {
+          "name": "starts_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true,
+          "generated": {
+            "type": "stored",
+            "as": "make_date(left(year_month, 4)::int, right(year_month, 2)::int, 1)"
+          }
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'open'"
+        },
+        "closed_at": {
+          "name": "closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "default_alert_pct": {
+          "name": "default_alert_pct",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 10
+        }
+      },
+      "indexes": {
+        "months_starts_on_idx": {
+          "name": "months_starts_on_idx",
+          "columns": [
+            {
+              "expression": "starts_on",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "months_yearMonth_unique": {
+          "name": "months_yearMonth_unique",
+          "columns": [
+            "year_month"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "months_year_month_format": {
+          "name": "months_year_month_format",
+          "value": "year_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'"
+        },
+        "months_status": {
+          "name": "months_status",
+          "value": "status in ('open', 'closed')"
+        },
+        "months_alert_pct": {
+          "name": "months_alert_pct",
+          "value": "default_alert_pct between 0 and 100"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.settings": {
+      "name": "settings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "smallint",
+          "primaryKey": true,
+          "notNull": true,
+          "default": 1
+        },
+        "currency_code": {
+          "name": "currency_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'LKR'"
+        },
+        "currency_symbol": {
+          "name": "currency_symbol",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'Rs'"
+        },
+        "default_alert_pct": {
+          "name": "default_alert_pct",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 10
+        },
+        "default_income_source": {
+          "name": "default_income_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'Salary'"
+        },
+        "default_income_amount": {
+          "name": "default_income_amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "default_account_id": {
+          "name": "default_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "settings_default_account_id_accounts_id_fk": {
+          "name": "settings_default_account_id_accounts_id_fk",
+          "tableFrom": "settings",
+          "columnsFrom": [
+            "default_account_id"
+          ],
+          "tableTo": "accounts",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "settings_singleton": {
+          "name": "settings_singleton",
+          "value": "id = 1"
+        },
+        "settings_default_income": {
+          "name": "settings_default_income",
+          "value": "default_income_amount is null or default_income_amount > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.transfers": {
+      "name": "transfers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "month_id": {
+          "name": "month_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_kind": {
+          "name": "from_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_category_id": {
+          "name": "from_category_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "to_kind": {
+          "name": "to_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "to_category_id": {
+          "name": "to_category_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amount": {
+          "name": "amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "occurred_on": {
+          "name": "occurred_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "transfers_month_idx": {
+          "name": "transfers_month_idx",
+          "columns": [
+            {
+              "expression": "month_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "transfers_month_id_months_id_fk": {
+          "name": "transfers_month_id_months_id_fk",
+          "tableFrom": "transfers",
+          "columnsFrom": [
+            "month_id"
+          ],
+          "tableTo": "months",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "transfers_from_category_id_categories_id_fk": {
+          "name": "transfers_from_category_id_categories_id_fk",
+          "tableFrom": "transfers",
+          "columnsFrom": [
+            "from_category_id"
+          ],
+          "tableTo": "categories",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "transfers_to_category_id_categories_id_fk": {
+          "name": "transfers_to_category_id_categories_id_fk",
+          "tableFrom": "transfers",
+          "columnsFrom": [
+            "to_category_id"
+          ],
+          "tableTo": "categories",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "transfers_amount_positive": {
+          "name": "transfers_amount_positive",
+          "value": "amount > 0"
+        },
+        "transfers_from_kind": {
+          "name": "transfers_from_kind",
+          "value": "from_kind in ('category', 'savings', 'external')"
+        },
+        "transfers_to_kind": {
+          "name": "transfers_to_kind",
+          "value": "to_kind in ('category', 'savings', 'external')"
+        },
+        "transfers_reason": {
+          "name": "transfers_reason",
+          "value": "reason in ('cover', 'month_close', 'manual', 'income')"
+        },
+        "transfers_from_category": {
+          "name": "transfers_from_category",
+          "value": "(from_kind = 'category') = (from_category_id is not null)"
+        },
+        "transfers_to_category": {
+          "name": "transfers_to_category",
+          "value": "(to_kind = 'category') = (to_category_id is not null)"
+        },
+        "transfers_distinct_ends": {
+          "name": "transfers_distinct_ends",
+          "value": "from_kind <> to_kind or (from_kind = 'category' and from_category_id <> to_category_id)"
+        },
+        "transfers_external_with_savings": {
+          "name": "transfers_external_with_savings",
+          "value": "(from_kind <> 'external' or to_kind = 'savings') and (to_kind <> 'external' or from_kind = 'savings')"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "views": {
+    "public.account_balances": {
+      "name": "account_balances",
+      "schema": "public",
+      "columns": {
+        "accountId": {
+          "name": "accountId",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sortOrder": {
+          "name": "sortOrder",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "archivedAt": {
+          "name": "archivedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "balance": {
+          "name": "balance",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "materialized": false,
+      "isExisting": true
+    },
+    "public.category_month_summary": {
+      "name": "category_month_summary",
+      "schema": "public",
+      "columns": {
+        "monthId": {
+          "name": "monthId",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "yearMonth": {
+          "name": "yearMonth",
+          "type": "char(7)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "categoryId": {
+          "name": "categoryId",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "color": {
+          "name": "color",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sortOrder": {
+          "name": "sortOrder",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "archivedAt": {
+          "name": "archivedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "allocation": {
+          "name": "allocation",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "alertPct": {
+          "name": "alertPct",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "transfersIn": {
+          "name": "transfersIn",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "transfersOut": {
+          "name": "transfersOut",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "effectiveAllocation": {
+          "name": "effectiveAllocation",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "spent": {
+          "name": "spent",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "remaining": {
+          "name": "remaining",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "swept": {
+          "name": "swept",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "materialized": false,
+      "isExisting": true
+    },
+    "public.monthly_item_status": {
+      "name": "monthly_item_status",
+      "schema": "public",
+      "columns": {
+        "monthId": {
+          "name": "monthId",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "yearMonth": {
+          "name": "yearMonth",
+          "type": "char(7)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "itemId": {
+          "name": "itemId",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "categoryId": {
+          "name": "categoryId",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expected": {
+          "name": "expected",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "paid": {
+          "name": "paid",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "materialized": false,
+      "isExisting": true
+    },
+    "public.savings_balance": {
+      "name": "savings_balance",
+      "schema": "public",
+      "columns": {
+        "balance": {
+          "name": "balance",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "materialized": false,
+      "isExisting": true
+    }
+  },
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

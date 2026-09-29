@@ -31,7 +31,7 @@ export function PlanBand({
     start(async () => {
       const res = await receiveIncomeAction(line.id);
       if (!res.ok) toast.error(res.error);
-      else toast.success(`${line.source} received · ${formatMoney(line.amount, currency)} added to Savings`);
+      else toast.success(`${line.source} received · ${formatMoney(line.amount, currency)} into ${res.data.account}`);
     });
   const undo = (line: IncomeLine) =>
     start(async () => {
@@ -42,15 +42,26 @@ export function PlanBand({
 
   return (
     <section aria-label="Money plan" className="card flex flex-col gap-4 px-5 py-4">
-      {plan.kind === "plan" ? (
+      {plan.kind === "current" ? (
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+          <Figure label="In your accounts" value={formatMoney(plan.inAccounts, currency)} />
+          <Op>+</Op>
+          <Figure label="Still expected" value={formatMoney(plan.expected, currency)} />
+          <Op>−</Op>
+          <Figure label={`Left to spend in ${month}`} value={formatMoney(plan.leftToSpend, currency)} sub="unspent budgets" />
+          <Op>=</Op>
+          <Figure
+            label={`Free after ${month}`}
+            value={formatMoney(plan.freeAfter, currency)}
+            className={plan.freeAfter < 0 ? "text-bad" : "text-ok"}
+            sub="if every budget is spent"
+          />
+        </div>
+      ) : plan.kind === "future" ? (
         <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
           <Figure label="Carried in" value={formatMoney(plan.carriedIn, currency)} />
           <Op>+</Op>
-          <Figure
-            label="Income"
-            value={formatMoney(plan.received + plan.expected, currency)}
-            sub={plan.expected > 0 ? `${formatAmount(plan.expected)} still expected` : undefined}
-          />
+          <Figure label="Income" value={formatMoney(plan.income, currency)} />
           <Op>−</Op>
           <Figure label={`${month} budgets`} value={formatMoney(plan.budgets, currency)} />
           <Op>=</Op>
@@ -65,7 +76,7 @@ export function PlanBand({
         <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
           <Figure label="Income received" value={formatMoney(plan.received, currency)} />
           <Figure label="Spent" value={formatMoney(plan.spent, currency)} />
-          <Figure label="Returned to Savings" value={formatMoney(plan.returned, currency)} className="text-ok" />
+          <Figure label="Left unspent" value={formatMoney(plan.returned, currency)} className="text-ok" />
         </div>
       )}
 
@@ -86,6 +97,7 @@ export function PlanBand({
               )}
               <span>{i.source}</span>
               <span className="font-semibold">{formatAmount(i.amount)}</span>
+              {i.accountName && <span className="text-xs text-muted-ink">→ {i.accountName}</span>}
               {i.status === "received" ? (
                 <>
                   <span className="text-xs text-muted-ink">{i.receivedOn ? formatDay(i.receivedOn, { day: "numeric", month: "short" }) : ""}</span>

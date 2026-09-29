@@ -20,6 +20,8 @@ export type EntryData = {
   summaries: CategorySummary[];
   catalog: { categories: CatalogCategory[]; items: CatalogItem[] };
   monthly: DueItem[];
+  accounts: { id: string; name: string; balance: number }[];
+  defaultAccountId: string | null;
 };
 
 export type ExpensePayload = {
@@ -28,6 +30,7 @@ export type ExpensePayload = {
   itemId: string | null;
   amount: number;
   note: string | null;
+  accountId: string | null;
 };
 
 export type ExpenseSheetMode =
@@ -59,6 +62,10 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
   // Once you type an amount (or are editing a saved one), picking an item no longer replaces it.
   const [amountTyped, setAmountTyped] = useState(!!original);
   const [note, setNote] = useState(original?.note ?? "");
+  // New expenses default to the chosen default account (ComBank); edits keep what was saved.
+  const [accountId, setAccountId] = useState<string | null>(
+    original ? original.accountId : (data.defaultAccountId ?? data.accounts[0]?.id ?? null),
+  );
   const [newCategory, setNewCategory] = useState<{ name: string; allocation: string; alertPct: string } | null>(null);
   const [newItem, setNewItem] = useState<{ name: string; kind: "one_off" | "monthly"; amount: string } | null>(null);
   const [extraCats, setExtraCats] = useState<CatalogCategory[]>([]);
@@ -161,7 +168,11 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!amount) return void toast.error("Enter an amount above zero.");
-    onSubmit({ spentOn: date, categoryId, itemId: categoryId ? itemId : null, amount, note: note.trim() || null }, original?.id);
+    if (!original && !accountId) return void toast.error("Choose which account paid.");
+    onSubmit(
+      { spentOn: date, categoryId, itemId: categoryId ? itemId : null, amount, note: note.trim() || null, accountId },
+      original?.id,
+    );
   };
 
   const warn = budget && budget.state !== "green";
@@ -339,6 +350,54 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
             );
           })()}
         </div>
+
+        {data.accounts.length > 0 && (
+          <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0">
+            <legend className={cn(fieldLabel, "pb-1.5")}>Paid from</legend>
+            <div className="flex flex-wrap gap-2">
+              {data.accounts.map((a) => {
+                const after = a.balance - (accountId === a.id ? (amount ?? 0) - (original?.accountId === a.id ? original.amount : 0) : 0);
+                return (
+                  <label
+                    key={a.id}
+                    className={cn(
+                      "flex min-h-12 flex-1 cursor-pointer items-center gap-2.5 rounded-xl border px-3.5",
+                      accountId === a.id ? "border-[1.5px] border-teal bg-teal-wash" : "border-line-strong",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="account"
+                      checked={accountId === a.id}
+                      onChange={() => setAccountId(a.id)}
+                      className="size-[18px] accent-teal"
+                    />
+                    <span className="flex flex-col">
+                      <span className="text-[15px] font-medium">{a.name}</span>
+                      <span className={cn("text-xs", after < 0 ? "font-semibold text-bad" : "text-muted-ink")}>
+                        {accountId === a.id && amount ? `${formatAmount(after)} after` : formatAmount(a.balance)}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+              {original && original.accountId === null && (
+                <label
+                  className={cn(
+                    "flex min-h-12 flex-1 cursor-pointer items-center gap-2.5 rounded-xl border px-3.5",
+                    accountId === null ? "border-[1.5px] border-teal bg-teal-wash" : "border-line-strong",
+                  )}
+                >
+                  <input type="radio" name="account" checked={accountId === null} onChange={() => setAccountId(null)} className="size-[18px] accent-teal" />
+                  <span className="flex flex-col">
+                    <span className="text-[15px] font-medium">Not tracked</span>
+                    <span className="text-xs text-muted-ink">logged before accounts</span>
+                  </span>
+                </label>
+              )}
+            </div>
+          </fieldset>
+        )}
 
         <div className="flex flex-col gap-1.5">
           <label htmlFor="note" className={fieldLabel}>Note <span className="font-normal">(optional)</span></label>

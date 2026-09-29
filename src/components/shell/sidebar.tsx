@@ -9,7 +9,7 @@ const NAV = [
   { href: "/dashboard", label: "Dashboard", match: "/dashboard" },
   { href: "/", label: "Daily entry", match: "/day" },
   { href: "/setup", label: "Setup", match: "/setup" },
-  { href: "/savings", label: "Savings", match: "/savings" },
+  { href: "/savings", label: "Accounts", match: "/savings" },
   { href: "/close", label: "Close month", match: "/close" },
 ];
 

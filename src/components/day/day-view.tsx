@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Lock, Plus } from "lucide-react";
+import { BarChart3, Check, ChevronDown, ChevronLeft, ChevronRight, Lock, Plus } from "lucide-react";
 import { ExpenseSheet, type ExpensePayload, type ExpenseSheetMode } from "@/components/sheets/expense-sheet";
 import { CoverSheet } from "@/components/sheets/cover-sheet";
 import { createExpenseAction, deleteExpenseAction, updateExpenseAction } from "@/server/actions";
@@ -48,6 +48,7 @@ export function DayView({ data }: { data: DayData }) {
       itemId: p.itemId,
       itemName: item?.name ?? null,
       itemKind: item?.kind ?? null,
+      accountId: p.accountId,
     };
   };
 
@@ -56,7 +57,9 @@ export function DayView({ data }: { data: DayData }) {
     startTransition(async () => {
       if (id) applyOptimistic({ type: "update", row: toRow(payload, id) });
       else if (payload.spentOn === data.date) applyOptimistic({ type: "add", row: toRow(payload, `pending-${Date.now()}`) });
-      const res = id ? await updateExpenseAction({ id, expense: payload }) : await createExpenseAction(payload);
+      const res = id
+        ? await updateExpenseAction({ id, expense: payload })
+        : await createExpenseAction({ ...payload, accountId: payload.accountId ?? "" });
       if (!res.ok) return void toast.error(res.error);
       const c = res.data.category;
       if (!c) {
@@ -145,7 +148,11 @@ export function DayView({ data }: { data: DayData }) {
             </div>
           </div>
         ) : (
-          <div className="flex items-end justify-between rounded-[18px] bg-teal px-[18px] py-4 text-white">
+          <Link
+            href={`/charts?from=${encodeURIComponent(`/day/${data.date}`)}`}
+            aria-label="Open spending charts"
+            className="flex items-end justify-between rounded-[18px] bg-teal px-[18px] py-4 text-white active:opacity-90"
+          >
             <div className="flex flex-col gap-1">
               <span className="text-[13px] opacity-85">Spent {isToday ? "today" : "this day"}</span>
               <span className="font-display text-[30px] leading-tight font-semibold">{formatMoney(data.totals.spentToday, data.currency)}</span>
@@ -157,7 +164,8 @@ export function DayView({ data }: { data: DayData }) {
                 <span className="text-xs opacity-85">of {formatMoney(data.totals.allocated, data.currency)} allocated</span>
               </div>
             )}
-          </div>
+            <BarChart3 aria-hidden className="mb-1 ml-2 size-4 shrink-0 opacity-70" />
+          </Link>
         )}
 
         {data.inboxCount > 0 && (

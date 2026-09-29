@@ -3,9 +3,10 @@ import { and, eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { categoryBudgets, categoryMonthSummary, expenses, incomes, monthlyItemStatus, months } from "@/db/schema";
 import { closeBlockers, closeMonth, ensureMonth, getMonth } from "@/server/domain/months";
-import { adjustSavings, getSavingsBalance, moveToCategory } from "@/server/domain/transfers";
+import { getSavingsBalance, moveToCategory } from "@/server/domain/transfers";
 import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
-import { assignCategory, updateExpense } from "@/server/domain/expenses";
+import { assignCategory, createExpense, updateExpense } from "@/server/domain/expenses";
+import { createAccount, getAccounts, setAccountBalance, transferBetweenAccounts } from "@/server/domain/accounts";
 import { createItem, itemsForMonth, removeCategory, saveSetup } from "@/server/domain/catalog";
 import { freshDb, rs, seedSeptember } from "./helpers";
 
@@ -77,12 +78,60 @@ describe("covers", () => {
       moveToCategory(db, { ym: "2026-09", toCategoryId: s.dining.id, source: { kind: "savings" }, amount: rs(1000), todayStr: "2026-09-29" }),
     ).rejects.toThrow(/Savings only has Rs 0 free/);
 
-    // Budgets are paid out of Savings: 65,000 in − 60,000 of September caps = 5,000 free.
-    await adjustSavings(db, { direction: "in", amount: rs(65000), note: "Starting balance", todayStr: "2026-09-29" });
+    // Free = money in accounts − what's still unspent in budgets (500 Groceries + 18,000 Utilities).
+    await createAccount(db, { name: "ComBank", opening: rs(23500), todayStr: "2026-09-29" });
     expect(await getSavingsBalance(db, "2026-09")).toBe(rs(5000));
+    // Covering an overspend doesn't change free money: that cash was already spent.
     await moveToCategory(db, { ym: "2026-09", toCategoryId: s.dining.id, source: { kind: "savings" }, amount: rs(1000), todayStr: "2026-09-29" });
-    expect(await getSavingsBalance(db, "2026-09")).toBe(rs(4000));
     expect((await summary("2026-09", s.dining.id)).remaining).toBe(0);
+    expect(await getSavingsBalance(db, "2026-09")).toBe(rs(5000));
+    // Topping up a budget that still has room sets more money aside.
+    await moveToCategory(db, { ym: "2026-09", toCategoryId: s.groceries.id, source: { kind: "savings" }, amount: rs(1000), todayStr: "2026-09-29" });
+    expect(await getSavingsBalance(db, "2026-09")).toBe(rs(4000));
+  });
+});
+
+describe("accounts", () => {
+  it("balance = opening + income received − expenses paid from it; corrections and transfers", async () => {
+    const s = await seedSeptember(db);
+    const com = await createAccount(db, { name: "ComBank", opening: rs(183282), todayStr: "2026-09-29" });
+    const amana = await createAccount(db, { name: "Amana", opening: rs(600286), todayStr: "2026-09-29" });
+    const bal = async () => Object.fromEntries((await getAccounts(db)).map((a) => [a.name, a.balance]));
+
+    // Legacy expense (no account) doesn't move balances; a new one does.
+    await s.expense(s.groceries.id, rs(1000));
+    await createExpense(db, { spentOn: "2026-09-29", categoryId: s.groceries.id, itemId: null, amount: rs(2850), note: null, accountId: com.id });
+    expect(await bal()).toEqual({ ComBank: rs(183282 - 2850), Amana: rs(600286) });
+
+    await transferBetweenAccounts(db, { fromId: amana.id, toId: com.id, amount: rs(100000), todayStr: "2026-09-29" });
+    await expect(transferBetweenAccounts(db, { fromId: com.id, toId: amana.id, amount: rs(10_000_000), todayStr: "2026-09-29" })).rejects.toThrow(
+      /only has/,
+    );
+    await setAccountBalance(db, { accountId: amana.id, actual: rs(500000), todayStr: "2026-09-30" });
+    expect(await bal()).toEqual({ ComBank: rs(183282 - 2850 + 100000), Amana: rs(500000) });
+
+    // Income lands in its account when received.
+    await saveSetup(db, {
+      ym: "2026-09", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR", categories: [],
+      incomes: [{ source: "Insurance", amount: rs(300000), accountId: com.id }],
+    });
+    const m = (await getMonth(db, "2026-09"))!;
+    const [ins] = await db.select().from(incomes).where(eq(incomes.monthId, m.id));
+    await receiveIncome(db, ins.id, "2026-09-30");
+    expect((await bal()).ComBank).toBe(rs(183282 - 2850 + 100000 + 300000));
+    await undoReceiveIncome(db, ins.id);
+    expect((await bal()).ComBank).toBe(rs(183282 - 2850 + 100000));
+  });
+
+  it("income needs an account before it can be received", async () => {
+    await seedSeptember(db);
+    await saveSetup(db, {
+      ym: "2026-09", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR", categories: [],
+      incomes: [{ source: "Bonus", amount: rs(1000), accountId: null }],
+    });
+    const m = (await getMonth(db, "2026-09"))!;
+    const [line] = await db.select().from(incomes).where(eq(incomes.monthId, m.id));
+    await expect(receiveIncome(db, line.id, "2026-09-30")).rejects.toThrow(/Choose which account/);
   });
 });
 
@@ -140,8 +189,8 @@ describe("month close", () => {
     const { swept } = await closeMonth(db, "2026-09", "2026-09-30");
     // Groceries 30,000 − 17,600 − 780 − 1,350 + Utilities 18,000 + Dining 0
     expect(swept).toBe(rs(10270 + 18000));
-    // Budgets came out of Savings and leftovers went back: net effect is minus what was spent.
-    expect(await getSavingsBalance(db, "2026-09")).toBe(-rs(17600 + 780 + 13350));
+    // Once closed, nothing in September is set aside any more (no accounts in this test).
+    expect(await getSavingsBalance(db, "2026-09")).toBe(0);
     expect((await getMonth(db, "2026-09"))!.status).toBe("closed");
     const g = await summary("2026-09", s.groceries.id);
     expect(g.swept).toBe(rs(10270));
@@ -217,8 +266,14 @@ describe("setup", () => {
 });
 
 describe("income", () => {
-  const setup = (ym: string, incomesList: { source: string; amount: number }[], defaultIncome?: { source: string; amount: number | null }) =>
-    saveSetup(db, { ym, defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR", categories: [], incomes: incomesList, defaultIncome });
+  // Income lands in an account; these tests use one empty ComBank account.
+  const setup = async (ym: string, incomesList: { source: string; amount: number }[], defaultIncome?: { source: string; amount: number | null }) => {
+    const acct = (await getAccounts(db))[0] ?? (await createAccount(db, { name: "ComBank", opening: 0, todayStr: "2026-09-01" }));
+    return saveSetup(db, {
+      ym, defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR", categories: [], defaultIncome,
+      incomes: incomesList.map((i) => ({ ...i, accountId: acct.id })),
+    });
+  };
   const lines = async (ym: string) => {
     const m = (await getMonth(db, ym))!;
     return db.select().from(incomes).where(eq(incomes.monthId, m.id));
@@ -231,7 +286,7 @@ describe("income", () => {
     expect((await lines("2026-10")).map((r) => [r.source, r.amount, r.status])).toEqual([["Salary", rs(1089000), "expected"]]);
   });
 
-  it("counts in Savings only once received, and can be undone", async () => {
+  it("counts toward free money only once received, and can be undone", async () => {
     await seedSeptember(db); // 60,000 of September budgets
     await setup("2026-09", [{ source: "Com", amount: rs(566000) }, { source: "Insurance", amount: rs(300000) }]);
     expect(await getSavingsBalance(db, "2026-09")).toBe(-rs(60000));

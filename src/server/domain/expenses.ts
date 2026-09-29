@@ -12,6 +12,8 @@ export type ExpenseInput = {
   itemId: string | null;
   amount: number;
   note: string | null;
+  /** Which account paid; null only for expenses from before accounts existed. */
+  accountId?: string | null;
 };
 
 async function checkItem(db: Db, input: ExpenseInput) {

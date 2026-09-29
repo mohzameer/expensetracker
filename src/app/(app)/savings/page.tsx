@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import { getDb } from "@/db";
-import { SavingsView } from "@/components/savings/savings-view";
-import { getSavingsPage } from "@/server/queries";
+import { AccountsView } from "@/components/savings/accounts-view";
+import { getMoneyPage } from "@/server/queries";
 
-export const metadata: Metadata = { title: "Savings" };
+export const metadata: Metadata = { title: "Accounts" };
 
-export default async function SavingsPage() {
-  const data = await getSavingsPage(await getDb());
-  return <SavingsView data={data} />;
+export default async function AccountsPage() {
+  const data = await getMoneyPage(await getDb());
+  return <AccountsView data={data} />;
 }

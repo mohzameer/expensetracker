@@ -11,7 +11,8 @@ import { addMonths, currentYearMonth, firstDay, lastDay, today } from "../src/li
 import { createCategory, createItem } from "../src/server/domain/catalog";
 import { createExpense } from "../src/server/domain/expenses";
 import { closeMonth, ensureMonth } from "../src/server/domain/months";
-import { adjustSavings, moveToCategory } from "../src/server/domain/transfers";
+import { moveToCategory } from "../src/server/domain/transfers";
+import { createAccount } from "../src/server/domain/accounts";
 
 const rs = (n: number) => Math.round(n * 100);
 
@@ -46,6 +47,8 @@ async function seedCatalog(db: Db, ym: string) {
 
 async function seedDemo(db: Db, ids: Record<string, string>, prev: string, cur: string) {
   const t = today();
+  // One bank account that everything is paid from, opened at the start of last month.
+  const bank = await createAccount(db, { name: "Bank", opening: rs(400000), todayStr: firstDay(prev) });
   const spend = (date: string, cat: string | null, amount: number, item?: string, note?: string) =>
     createExpense(db, {
       spentOn: date,
@@ -53,15 +56,14 @@ async function seedDemo(db: Db, ids: Record<string, string>, prev: string, cur: 
       itemId: cat && item ? ids[`${cat}/${item}`] : null,
       amount: rs(amount),
       note: note ?? null,
+      accountId: bank.id,
     });
   const day = (ym: string, d: number) => {
     const date = `${ym}-${String(d).padStart(2, "0")}`;
     return date > t ? t : date;
   };
 
-  // Last month: a starting balance, ordinary spending, one cover, then close.
-  // Budgets are paid out of Savings, so start with enough in it.
-  await adjustSavings(db, { direction: "in", amount: rs(150000), note: "Starting balance", todayStr: firstDay(prev) });
+  // Last month: ordinary spending, one cover from free money, then close.
   const p = [
     [2, "Groceries", 6200, "Keells"], [5, "Utilities", 6800, "Electricity"], [5, "Utilities", 1400, "Water"],
     [6, "Utilities", 3990, "Internet"], [7, "Subscriptions", 6000, "Gym"], [9, "Transport", 4200, "Fuel"],
@@ -112,6 +114,8 @@ async function main() {
   } else {
     await ensureMonth(db, cur);
     await seedCatalog(db, cur);
+    // Expenses need an account to be paid from; set its real balance on the Accounts page.
+    await createAccount(db, { name: "Bank", opening: 0, todayStr: today() });
   }
   console.log(demo ? `Seeded demo data for ${prev} (closed) and ${cur}.` : `Seeded starter categories for ${cur}.`);
   process.exit(0);

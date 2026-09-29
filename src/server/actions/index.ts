@@ -11,6 +11,7 @@ import { assignCategory, createExpense, deleteExpense, updateExpense } from "@/s
 import { closeMonth } from "@/server/domain/months";
 import { adjustSavings, moveToCategory } from "@/server/domain/transfers";
 import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
+import { createAccount, setAccountBalance, setDefaultAccount, transferBetweenAccounts } from "@/server/domain/accounts";
 
 // ---- auth ----
 
@@ -34,8 +35,8 @@ export async function logoutAction() {
 
 // ---- expenses ----
 
-export async function createExpenseAction(input: z.input<typeof s.expenseInput>) {
-  return runAction(s.expenseInput, input, (db, d) => createExpense(db, d));
+export async function createExpenseAction(input: z.input<typeof s.newExpenseInput>) {
+  return runAction(s.newExpenseInput, input, (db, d) => createExpense(db, d));
 }
 
 export async function updateExpenseAction(input: { id: string; expense: z.input<typeof s.expenseInput> }) {
@@ -88,4 +89,22 @@ export async function receiveIncomeAction(id: string) {
 
 export async function undoReceiveIncomeAction(id: string) {
   return runAction(s.id, id, (db, d) => undoReceiveIncome(db, d));
+}
+
+// ---- accounts ----
+
+export async function createAccountAction(input: z.input<typeof s.newAccountInput>) {
+  return runAction(s.newAccountInput, input, (db, d) => createAccount(db, { ...d, todayStr: today() }));
+}
+
+export async function setAccountBalanceAction(input: z.input<typeof s.setBalanceInput>) {
+  return runAction(s.setBalanceInput, input, (db, d) => setAccountBalance(db, { ...d, todayStr: today() }));
+}
+
+export async function transferBetweenAccountsAction(input: z.input<typeof s.accountTransferInput>) {
+  return runAction(s.accountTransferInput, input, (db, d) => transferBetweenAccounts(db, { ...d, todayStr: today() }));
+}
+
+export async function setDefaultAccountAction(accountId: string) {
+  return runAction(s.id, accountId, (db, d) => setDefaultAccount(db, d));
 }

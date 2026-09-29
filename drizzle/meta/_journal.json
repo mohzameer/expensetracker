@@ -43,6 +43,20 @@
       "when": 1790694509201,
       "tag": "0005_one_off_items_per_month",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790705634067,
+      "tag": "0006_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790705641252,
+      "tag": "0007_account_balances_view",
+      "breakpoints": true
     }
   ]
 }

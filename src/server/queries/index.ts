@@ -1,8 +1,8 @@
 import "server-only";
-import { and, asc, desc, eq, gte, isNull, lt, lte, ne, or, sql, sum } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { and, asc, desc, eq, gt, gte, isNotNull, isNull, lt, lte, sql, sum } from "drizzle-orm";
 import type { Db } from "@/db";
-import { categories, categoryBudgets, categoryMonthSummary, expenses, incomes, items, monthlyItemStatus, months, transfers } from "@/db/schema";
+import { accountEntries, accounts, categories, categoryBudgets, categoryMonthSummary, expenses, incomes, items, monthlyItemStatus, months } from "@/db/schema";
+import { getAccounts, totalBalance } from "@/server/domain/accounts";
 import { addMonths, currentYearMonth, daysInMonth, firstDay, monthOf, nextMonthStart, today } from "@/lib/dates";
 import { stateAfter } from "@/lib/budget";
 import { closeBlockers, ensureMonth, getMonth, getSettings, type Month } from "@/server/domain/months";
@@ -130,6 +130,7 @@ const expenseColumns = {
   itemId: expenses.itemId,
   itemName: items.name,
   itemKind: items.kind,
+  accountId: expenses.accountId,
 };
 
 export type ExpenseRow = {
@@ -143,12 +144,14 @@ export type ExpenseRow = {
   itemId: string | null;
   itemName: string | null;
   itemKind: "monthly" | "one_off" | null;
+  accountId: string | null;
 };
 
 export async function getDayView(db: Db, date: string) {
   const ym = monthOf(date);
   const month = await getMonth(db, ym);
-  const [settings, summaries, catalog, monthly, dayExpenses, count, savings, monthSpend] = await Promise.all([
+  const [accountList, settings, summaries, catalog, monthly, dayExpenses, count, savings, monthSpend] = await Promise.all([
+    getAccounts(db),
     getSettings(db),
     getSummaries(db, month),
     getCatalog(db, month),
@@ -183,6 +186,8 @@ export async function getDayView(db: Db, date: string) {
     expenses: dayExpenses as ExpenseRow[],
     inboxCount: count,
     savings,
+    accounts: accountList,
+    defaultAccountId: settings.defaultAccountId,
     totals: {
       spentToday: dayExpenses.reduce((a, e) => a + e.amount, 0),
       spentMonth: monthSpend[0]?.total ?? 0,
@@ -209,24 +214,57 @@ export async function getInbox(db: Db) {
   return { rows, summariesByMonth, catalog: await getCatalog(db), currency: settings.currencySymbol };
 }
 
-export type IncomeLine = { id: string; source: string; amount: number; status: "expected" | "received"; receivedOn: string | null };
+export type IncomeLine = {
+  id: string;
+  source: string;
+  amount: number;
+  status: "expected" | "received";
+  receivedOn: string | null;
+  accountId: string | null;
+  accountName: string | null;
+};
 
 export async function getIncomes(db: Db, month: Month | null): Promise<IncomeLine[]> {
   if (!month) return [];
   return db
-    .select({ id: incomes.id, source: incomes.source, amount: incomes.amount, status: incomes.status, receivedOn: incomes.receivedOn })
+    .select({
+      id: incomes.id,
+      source: incomes.source,
+      amount: incomes.amount,
+      status: incomes.status,
+      receivedOn: incomes.receivedOn,
+      accountId: incomes.accountId,
+      accountName: accounts.name,
+    })
     .from(incomes)
+    .leftJoin(accounts, eq(accounts.id, incomes.accountId))
     .where(eq(incomes.monthId, month.id))
     .orderBy(asc(incomes.sortOrder), asc(incomes.createdAt));
 }
 
 export type MonthPlan =
-  | { kind: "plan"; carriedIn: number; received: number; expected: number; budgets: number; freeAfter: number }
+  | { kind: "current"; inAccounts: number; expected: number; leftToSpend: number; freeAfter: number }
+  | { kind: "future"; carriedIn: number; income: number; budgets: number; freeAfter: number }
   | { kind: "actual"; received: number; spent: number; returned: number };
 
+/** Unspent budget (never below 0) per category, for open months up to `ym`. */
+async function committedByMonth(db: Db, ym: string) {
+  return db
+    .select({
+      yearMonth: categoryMonthSummary.yearMonth,
+      categoryId: categoryMonthSummary.categoryId,
+      remaining: categoryMonthSummary.remaining,
+      delta: sql<number>`(${categoryMonthSummary.transfersIn} - ${categoryMonthSummary.transfersOut} - ${categoryMonthSummary.spent})::bigint`.mapWith(Number),
+    })
+    .from(categoryMonthSummary)
+    .innerJoin(months, eq(months.id, categoryMonthSummary.monthId))
+    .where(and(eq(months.status, "open"), lte(months.yearMonth, ym)));
+}
+
 /**
- * Your sheet's view of a month: money carried in + income − budgets = free after
- * the month (assuming budgets are fully spent). Past months report actuals instead.
+ * Your sheet's view of a month, in cash terms. This month: money in your accounts
+ * + income still expected − what's left to spend in budgets = free after the month.
+ * A later month: carried in + its income − its budgets. Past months report actuals.
  */
 export async function getMonthPlan(db: Db, ym: string): Promise<MonthPlan> {
   const cur = currentYearMonth();
@@ -234,7 +272,7 @@ export async function getMonthPlan(db: Db, ym: string): Promise<MonthPlan> {
     .select({ yearMonth: months.yearMonth, status: incomes.status, amount: incomes.amount })
     .from(incomes)
     .innerJoin(months, eq(months.id, incomes.monthId))
-    .where(lte(months.yearMonth, ym));
+    .where(lte(months.yearMonth, ym < cur ? ym : ym));
   const received = incomeRows.filter((r) => r.yearMonth === ym && r.status === "received").reduce((a, r) => a + r.amount, 0);
 
   if (ym < cur) {
@@ -248,21 +286,45 @@ export async function getMonthPlan(db: Db, ym: string): Promise<MonthPlan> {
     };
   }
 
+  const inAccounts = await totalBalance(db);
+  const leftToSpend = (await committedByMonth(db, cur)).reduce((a, r) => a + Math.max(r.remaining, 0), 0);
+  const expectedUpTo = (m: string) =>
+    incomeRows.filter((r) => r.status === "expected" && r.yearMonth <= m).reduce((a, r) => a + r.amount, 0);
+  const freeAfterCur = inAccounts + expectedUpTo(cur) - leftToSpend;
+  if (ym === cur) return { kind: "current", inAccounts, expected: expectedUpTo(cur), leftToSpend, freeAfter: freeAfterCur };
+
   const budgetRows = await db
     .select({ yearMonth: months.yearMonth, total: sql<number>`coalesce(sum(${categoryBudgets.allocation}), 0)::bigint`.mapWith(Number) })
     .from(categoryBudgets)
     .innerJoin(months, eq(months.id, categoryBudgets.monthId))
-    .where(and(gte(months.yearMonth, cur), lte(months.yearMonth, ym)))
+    .where(and(gt(months.yearMonth, cur), lte(months.yearMonth, ym)))
     .groupBy(months.yearMonth);
-  const budgetOf = (m: string) => budgetRows.find((b) => b.yearMonth === m)?.total ?? 0;
-
-  const savingsNow = await getSavingsBalance(db, cur); // already net of this month's budgets
-  const expectedToDate = incomeRows.filter((r) => r.status === "expected").reduce((a, r) => a + r.amount, 0);
-  const futureBudgets = budgetRows.filter((b) => b.yearMonth > cur).reduce((a, b) => a + b.total, 0);
-  const freeAfter = savingsNow + expectedToDate - futureBudgets;
+  const futureBudgets = budgetRows.reduce((a, b) => a + b.total, 0);
+  const budgets = budgetRows.find((b) => b.yearMonth === ym)?.total ?? 0;
+  const freeAfter = freeAfterCur + (expectedUpTo(ym) - expectedUpTo(cur)) - futureBudgets;
   const expected = incomeRows.filter((r) => r.yearMonth === ym && r.status === "expected").reduce((a, r) => a + r.amount, 0);
-  const budgets = budgetOf(ym);
-  return { kind: "plan", carriedIn: freeAfter - received - expected + budgets, received, expected, budgets, freeAfter };
+  const income = expected + received;
+  // Income received early for this month is already in the accounts, so it isn't carried in twice.
+  return { kind: "future", carriedIn: freeAfter - income + budgets, income, budgets, freeAfter };
+}
+
+/**
+ * Pieces Setup needs to recompute "free after the month" live while caps and
+ * income lines are edited: free = base + expected lines − (unspent budgets of the form).
+ */
+export async function getSetupPlanBase(db: Db, ym: string, plan: MonthPlan, thisMonthExpected: number, categoryIds: string[]) {
+  const cur = currentYearMonth();
+  if (plan.kind === "current") {
+    const rows = await committedByMonth(db, cur);
+    const inForm = new Set(categoryIds);
+    const others = rows.filter((r) => r.yearMonth !== ym || !inForm.has(r.categoryId)).reduce((a, r) => a + Math.max(r.remaining, 0), 0);
+    const deltas = Object.fromEntries(rows.filter((r) => r.yearMonth === ym).map((r) => [r.categoryId, r.delta]));
+    return { kind: "current" as const, base: plan.inAccounts + plan.expected - thisMonthExpected - others, deltas };
+  }
+  if (plan.kind === "future") {
+    return { kind: "future" as const, base: plan.carriedIn + (plan.income - thisMonthExpected), deltas: {} as Record<string, number> };
+  }
+  return null;
 }
 
 export async function getDashboard(db: Db, ym: string) {
@@ -320,78 +382,88 @@ export async function getDashboard(db: Db, ym: string) {
   };
 }
 
-export async function getSavingsPage(db: Db) {
-  const fromCat = alias(categories, "from_cat");
-  const toCat = alias(categories, "to_cat");
+/** Accounts page: balances, free money, and every movement in or out of an account. */
+export async function getMoneyPage(db: Db) {
   const cur = currentYearMonth();
-  const [settings, balance, ledger, perMonth, catalog, setAside, expected] = await Promise.all([
+  const [settings, accountList, free, committed, expected, entries, incomeIn, spendDays, catalog] = await Promise.all([
     getSettings(db),
+    getAccounts(db),
     getSavingsBalance(db, cur),
-    db
-      .select({
-        id: transfers.id,
-        occurredOn: transfers.occurredOn,
-        reason: transfers.reason,
-        note: transfers.note,
-        amount: transfers.amount,
-        fromKind: transfers.fromKind,
-        toKind: transfers.toKind,
-        fromName: fromCat.name,
-        toName: toCat.name,
-        yearMonth: months.yearMonth,
-      })
-      .from(transfers)
-      .innerJoin(months, eq(months.id, transfers.monthId))
-      .leftJoin(fromCat, eq(fromCat.id, transfers.fromCategoryId))
-      .leftJoin(toCat, eq(toCat.id, transfers.toCategoryId))
-      .where(or(eq(transfers.fromKind, "savings"), eq(transfers.toKind, "savings")))
-      .orderBy(desc(transfers.occurredOn), desc(transfers.createdAt))
-      .limit(300),
-    db
-      .select({
-        yearMonth: months.yearMonth,
-        status: months.status,
-        // Income + leftovers returned − the month's budgets − covers taken from Savings.
-        // For a closed month that is simply income − spending. Manual adjustments don't count.
-        net: sql<number>`(coalesce(sum(case when ${transfers.toKind} = 'savings' then ${transfers.amount} when ${transfers.fromKind} = 'savings' then -${transfers.amount} else 0 end), 0)
-          - (select coalesce(sum(b.allocation), 0) from category_budgets b where b.month_id = ${months.id}))::bigint`.mapWith(Number),
-        income: sql<number>`coalesce(sum(${transfers.amount}) filter (where ${transfers.reason} = 'income'), 0)::bigint`.mapWith(Number),
-        sweptIn: sql<number>`coalesce(sum(${transfers.amount}) filter (where ${transfers.reason} = 'month_close'), 0)::bigint`.mapWith(Number),
-      })
-      .from(months)
-      .leftJoin(
-        transfers,
-        and(
-          eq(transfers.monthId, months.id),
-          or(eq(transfers.reason, "income"), and(ne(transfers.fromKind, "external"), ne(transfers.toKind, "external"))),
-        ),
-      )
-      .where(and(gte(months.yearMonth, addMonths(cur, -11)), lte(months.yearMonth, cur)))
-      .groupBy(months.id, months.yearMonth, months.status)
-      .orderBy(asc(months.yearMonth)),
-    getCatalog(db),
-    // This month's budgets, already taken out of the free balance.
-    db
-      .select({ total: sql<number>`coalesce(sum(${categoryBudgets.allocation}), 0)::bigint`.mapWith(Number) })
-      .from(categoryBudgets)
-      .innerJoin(months, eq(months.id, categoryBudgets.monthId))
-      .where(and(eq(months.yearMonth, cur), eq(months.status, "open"))),
+    committedByMonth(db, cur),
     db
       .select({ source: incomes.source, amount: incomes.amount, yearMonth: months.yearMonth })
       .from(incomes)
       .innerJoin(months, eq(months.id, incomes.monthId))
       .where(and(eq(incomes.status, "expected"), lte(months.yearMonth, addMonths(cur, 1))))
       .orderBy(asc(months.yearMonth)),
+    db
+      .select({ id: accountEntries.id, accountId: accountEntries.accountId, date: accountEntries.occurredOn, amount: accountEntries.amount, kind: accountEntries.kind, note: accountEntries.note })
+      .from(accountEntries)
+      .orderBy(desc(accountEntries.occurredOn), desc(accountEntries.createdAt))
+      .limit(300),
+    db
+      .select({ id: incomes.id, accountId: incomes.accountId, date: incomes.receivedOn, amount: incomes.amount, source: incomes.source })
+      .from(incomes)
+      .where(and(eq(incomes.status, "received"), isNotNull(incomes.accountId)))
+      .limit(300),
+    db
+      .select({ accountId: expenses.accountId, date: expenses.spentOn, total: sum(expenses.amount).mapWith(Number), n: sql<number>`count(*)::int`.mapWith(Number) })
+      .from(expenses)
+      .where(and(isNotNull(expenses.accountId), gte(expenses.spentOn, firstDay(addMonths(cur, -2)))))
+      .groupBy(expenses.accountId, expenses.spentOn),
+    getCatalog(db),
   ]);
+
+  const KIND = { opening: "Opening balance", adjustment: "Correction", transfer: "Transfer" } as const;
+  const ledger = [
+    ...entries.map((e) => ({ key: e.id, accountId: e.accountId, date: e.date, what: e.note ?? KIND[e.kind], type: KIND[e.kind], amount: e.amount })),
+    ...incomeIn.map((i) => ({ key: i.id, accountId: i.accountId!, date: i.date!, what: i.source, type: "Income", amount: i.amount })),
+    ...spendDays.map((d) => ({
+      key: `x-${d.accountId}-${d.date}`,
+      accountId: d.accountId!,
+      date: d.date,
+      what: `${d.n} expense${d.n === 1 ? "" : "s"}`,
+      type: "Spending",
+      amount: -d.total,
+    })),
+  ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+
   return {
     currency: settings.currencySymbol,
-    balance,
-    setAside: setAside[0]?.total ?? 0,
+    ym: cur,
+    accounts: accountList,
+    defaultAccountId: settings.defaultAccountId,
+    free,
+    leftToSpend: committed.reduce((a, r) => a + Math.max(r.remaining, 0), 0),
     expected,
-    ledger: ledger.map((l) => ({ ...l, signed: l.toKind === "savings" ? l.amount : -l.amount })),
-    perMonth,
+    ledger,
     categories: catalog.categories,
-    ym: currentYearMonth(),
+  };
+}
+
+/** Spending by day, week (Mon–Sun) and month, with a category split for each bucket. */
+export async function getSpending(db: Db) {
+  const t = today();
+  const from = firstDay(addMonths(monthOf(t), -11));
+  const [settings, rows] = await Promise.all([
+    getSettings(db),
+    db
+      .select({
+        date: expenses.spentOn,
+        categoryId: expenses.categoryId,
+        name: categories.name,
+        color: categories.color,
+        total: sum(expenses.amount).mapWith(Number),
+      })
+      .from(expenses)
+      .leftJoin(categories, eq(categories.id, expenses.categoryId))
+      .where(and(gte(expenses.spentOn, from), lte(expenses.spentOn, t)))
+      .groupBy(expenses.spentOn, expenses.categoryId, categories.name, categories.color),
+  ]);
+  return {
+    today: t,
+    currency: settings.currencySymbol,
+    rows: rows.map((r) => ({ ...r, name: r.name ?? "Needs category", color: r.color ?? "var(--faint)" })),
   };
 }
 
@@ -447,15 +519,23 @@ export async function getSetupPage(db: Db, ym: string) {
   const month = ym >= cur ? await ensureMonth(db, ym) : await getMonth(db, ym);
   const prevYm = addMonths(ym, -1);
   const prev = await getMonth(db, prevYm);
-  const [income, plan, settings, catalog, budgets, prevBudgets] = await Promise.all([
+  const [income, plan, settings, catalog, budgets, prevBudgets, accountList] = await Promise.all([
     getIncomes(db, month),
     getMonthPlan(db, ym),
     getSettings(db),
     getCatalog(db, month),
     month ? db.select().from(categoryBudgets).where(eq(categoryBudgets.monthId, month.id)) : [],
     prev ? db.select().from(categoryBudgets).where(eq(categoryBudgets.monthId, prev.id)) : [],
+    getAccounts(db),
   ]);
   const byCat = new Map(budgets.map((b) => [b.categoryId, b]));
+  const planBase = await getSetupPlanBase(
+    db,
+    ym,
+    plan,
+    income.filter((i) => i.status === "expected").reduce((a, i) => a + i.amount, 0),
+    catalog.categories.map((c) => c.id),
+  );
   return {
     ym,
     prevYm,
@@ -465,6 +545,9 @@ export async function getSetupPage(db: Db, ym: string) {
     defaultAlertPct: month?.defaultAlertPct ?? settings.defaultAlertPct,
     incomes: income,
     plan,
+    planBase,
+    accounts: accountList,
+    defaultAccountId: settings.defaultAccountId,
     defaultIncome: { source: settings.defaultIncomeSource, amount: settings.defaultIncomeAmount },
     prevAllocations: Object.fromEntries(prevBudgets.map((b) => [b.categoryId, b.allocation])) as Record<string, number>,
     categories: catalog.categories.map((c) => ({

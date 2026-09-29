@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   char,
   check,
@@ -33,8 +34,45 @@ export const settings = pgTable(
     // Every new month starts with this expected income line (e.g. salary), if set.
     defaultIncomeSource: text().notNull().default("Salary"),
     defaultIncomeAmount: money(),
+    // Pre-selected "Paid from" account for new expenses, and where new months' default income goes.
+    defaultAccountId: uuid().references((): AnyPgColumn => accounts.id),
   },
   () => [check("settings_singleton", sql`id = 1`), check("settings_default_income", sql`default_income_amount is null or default_income_amount > 0`)],
+);
+
+/** Real money: bank accounts and cash. Balances are derived (see account_balances). */
+export const accounts = pgTable(
+  "accounts",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    name: text().notNull(),
+    sortOrder: integer().notNull().default(0),
+    archivedAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  () => [uniqueIndex("accounts_name_lower_idx").on(sql`lower(name)`)],
+);
+
+/** Opening balances, corrections and transfers between accounts (signed amounts). */
+export const accountEntries = pgTable(
+  "account_entries",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    accountId: uuid()
+      .notNull()
+      .references(() => accounts.id),
+    occurredOn: date({ mode: "string" }).notNull(),
+    amount: money().notNull(),
+    kind: text({ enum: ["opening", "adjustment", "transfer"] }).notNull(),
+    note: text(),
+    transferGroup: uuid(), // both legs of a transfer share it
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check("account_entries_amount_nonzero", sql`amount <> 0`),
+    check("account_entries_kind", sql`kind in ('opening', 'adjustment', 'transfer')`),
+    index("account_entries_account_idx").on(t.accountId, t.occurredOn),
+  ],
 );
 
 export const months = pgTable(
@@ -135,10 +173,13 @@ export const expenses = pgTable(
     itemId: uuid(),
     amount: money().notNull(),
     note: text(),
+    // Which account paid. Null only for expenses logged before accounts existed.
+    accountId: uuid().references(() => accounts.id),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    index("expenses_account_idx").on(t.accountId),
     foreignKey({
       name: "expenses_item_category_fk",
       columns: [t.itemId, t.categoryId],
@@ -207,14 +248,15 @@ export const incomes = pgTable(
     amount: money().notNull(),
     status: text({ enum: ["expected", "received"] }).notNull().default("expected"),
     receivedOn: date({ mode: "string" }),
-    transferId: uuid().references(() => transfers.id),
+    transferId: uuid().references(() => transfers.id), // legacy: income received before accounts
+    accountId: uuid().references(() => accounts.id), // where the money lands
     sortOrder: integer().notNull().default(0),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     check("incomes_amount_positive", sql`amount > 0`),
     check("incomes_status", sql`status in ('expected', 'received')`),
-    check("incomes_received", sql`(status = 'received') = (transfer_id is not null and received_on is not null)`),
+    check("incomes_received", sql`(status = 'received') = (received_on is not null)`),
     index("incomes_month_idx").on(t.monthId),
   ],
 );
@@ -250,6 +292,15 @@ export const monthlyItemStatus = pgView("monthly_item_status", {
   expected: money().notNull(),
   paid: money().notNull(),
   status: text({ enum: ["unpaid", "partial", "paid"] }).notNull(),
+}).existing();
+
+/** Current balance of each account: entries + income received into it − expenses paid from it. */
+export const accountBalances = pgView("account_balances", {
+  accountId: uuid().notNull(),
+  name: text().notNull(),
+  sortOrder: integer().notNull(),
+  archivedAt: timestamp({ withTimezone: true }),
+  balance: money().notNull(),
 }).existing();
 
 export const savingsBalance = pgView("savings_balance", {

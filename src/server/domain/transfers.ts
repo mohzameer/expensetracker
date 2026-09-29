@@ -1,25 +1,24 @@
 import { and, eq, lte, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { categoryBudgets, categoryMonthSummary, months, savingsBalance, settings, transfers } from "@/db/schema";
+import { categoryMonthSummary, months, settings, transfers } from "@/db/schema";
+import { totalBalance } from "./accounts";
 import { clampToMonth, currentYearMonth, monthOf } from "@/lib/dates";
 import { UserError } from "@/lib/errors";
 import { formatMoney } from "@/lib/money";
 import { assertOpen, lockMonth } from "./months";
 
 /**
- * Free savings: everything that came into Savings (income, deposits, month-end
- * leftovers) minus what went out (covers, withdrawals) minus the budgets of every
- * month up to `ym` — budgets are paid out of Savings. A closed month nets out to
- * minus what was actually spent.
+ * Free money: what's in your accounts, minus what's still unspent in the budgets
+ * of open months up to `ym` (that money is spoken for). Covers "from Savings" raise
+ * a budget, so they lower this too.
  */
 export async function getSavingsBalance(db: Db, ym: string = currentYearMonth()): Promise<number> {
-  const [row] = await db.select().from(savingsBalance);
   const [committed] = await db
-    .select({ total: sql<number>`coalesce(sum(${categoryBudgets.allocation}), 0)::bigint`.mapWith(Number) })
-    .from(categoryBudgets)
-    .innerJoin(months, eq(months.id, categoryBudgets.monthId))
-    .where(lte(months.yearMonth, ym));
-  return (row?.balance ?? 0) - (committed?.total ?? 0);
+    .select({ total: sql<number>`coalesce(sum(greatest(${categoryMonthSummary.remaining}, 0)), 0)::bigint`.mapWith(Number) })
+    .from(categoryMonthSummary)
+    .innerJoin(months, eq(months.id, categoryMonthSummary.monthId))
+    .where(and(eq(months.status, "open"), lte(months.yearMonth, ym)));
+  return (await totalBalance(db)) - (committed?.total ?? 0);
 }
 
 /** Serialise everything that spends Savings (it spans months). */
