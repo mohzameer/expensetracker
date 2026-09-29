@@ -16,12 +16,12 @@ import { adjustSavings, moveToCategory } from "../src/server/domain/transfers";
 const rs = (n: number) => Math.round(n * 100);
 
 const CATALOG = [
-  { name: "Groceries", color: "#1F5F5B", cap: 30000, items: [["Keells", "one_off"], ["Cargills", "one_off"], ["Market", "one_off"]] },
-  { name: "Dining", color: "#E08A3C", cap: 12000, items: [["Lunch", "one_off", 1250], ["Coffee", "one_off", 500], ["Dinner out", "one_off"]] },
-  { name: "Transport", color: "#6FA9A1", cap: 15000, items: [["PickMe", "one_off"], ["Fuel", "one_off"]] },
-  { name: "Utilities", color: "#7A6FB0", cap: 18000, items: [["Electricity", "monthly", 6800], ["Water", "monthly", 1400], ["Internet", "monthly", 3990]] },
-  { name: "Subscriptions", color: "#F2C28B", cap: 8000, items: [["Gym", "monthly", 6000], ["Streaming", "monthly", 1200]] },
-  { name: "Health", color: "#C9C3E6", cap: 10000, items: [["Pharmacy", "one_off"], ["Doctor", "one_off"]] },
+  { name: "Groceries", color: "#00897B", cap: 30000, items: [["Keells", "one_off"], ["Cargills", "one_off"], ["Market", "one_off"]] },
+  { name: "Dining", color: "#E2682F", cap: 12000, items: [["Lunch", "one_off", 1250], ["Coffee", "one_off", 500], ["Dinner out", "one_off"]] },
+  { name: "Transport", color: "#5E52B8", cap: 15000, items: [["PickMe", "one_off"], ["Fuel", "one_off"]] },
+  { name: "Utilities", color: "#DB9E00", cap: 18000, items: [["Electricity", "monthly", 6800], ["Water", "monthly", 1400], ["Internet", "monthly", 3990]] },
+  { name: "Subscriptions", color: "#D35C93", cap: 8000, items: [["Gym", "monthly", 6000], ["Streaming", "monthly", 1200]] },
+  { name: "Health", color: "#2E8B3E", cap: 10000, items: [["Pharmacy", "one_off"], ["Doctor", "one_off"]] },
 ] as const;
 
 async function seedCatalog(db: Db, ym: string) {

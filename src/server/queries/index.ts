@@ -298,7 +298,11 @@ export async function getSavingsPage(db: Db) {
         sweptIn: sql<number>`coalesce(sum(${transfers.amount}) filter (where ${transfers.reason} = 'month_close'), 0)::bigint`.mapWith(Number),
       })
       .from(months)
-      .leftJoin(transfers, and(eq(transfers.monthId, months.id), ne(transfers.fromKind, transfers.toKind)))
+      // Sweeps in minus money taken out for categories; manual deposits/withdrawals don't count as "saved".
+      .leftJoin(
+        transfers,
+        and(eq(transfers.monthId, months.id), ne(transfers.fromKind, "external"), ne(transfers.toKind, "external")),
+      )
       .where(gte(months.yearMonth, addMonths(currentYearMonth(), -11)))
       .groupBy(months.yearMonth, months.status)
       .orderBy(asc(months.yearMonth)),

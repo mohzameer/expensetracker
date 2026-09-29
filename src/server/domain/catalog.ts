@@ -2,9 +2,9 @@ import { and, eq, isNull, max, or, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { categories, categoryBudgets, expenses, items, months, settings, transfers } from "@/db/schema";
 import { UserError } from "@/lib/errors";
+import { CATEGORY_COLORS } from "@/lib/palette";
 import { assertOpen, ensureMonth, lockMonth } from "./months";
 
-export const CATEGORY_COLORS = ["#1F5F5B", "#E08A3C", "#6FA9A1", "#7A6FB0", "#F2C28B", "#C9C3E6", "#B5533C", "#8A9A5B", "#4C7FA8", "#D4A017"];
 
 export type NewCategory = { name: string; color?: string | null; allocation?: number | null; alertPct?: number | null; ym: string };
 
