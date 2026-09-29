@@ -82,4 +82,5 @@ export const setupInput = z.object({
       items: z.array(setupItem),
     }),
   ),
+  incomes: z.array(z.object({ source: z.string().trim().min(1, "Every income line needs a source").max(60), amount })).optional(),
 });

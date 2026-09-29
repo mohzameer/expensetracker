@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 type Data = Awaited<ReturnType<typeof getSetupPage>>;
 type Kind = "monthly" | "one_off";
 type ItemState = { key: string; id: string | null; name: string; kind: Kind; amount: string; removed: boolean };
+type IncomeState = { key: string; source: string; amount: string };
 type CatState = {
   key: string;
   id: string | null;
@@ -59,12 +60,18 @@ function initialState(data: Data): CatState[] {
   }));
 }
 
+function initialIncomes(data: Data): IncomeState[] {
+  return data.incomes.map((i, n) => ({ key: `inc-${n}`, source: i.source, amount: toInputValue(i.amount) }));
+}
+
 const field = "min-h-10 w-full rounded-[10px] border border-line-strong bg-surface px-2.5 text-[15px] outline-none focus:border-teal disabled:bg-paper";
 const label = "text-xs font-semibold text-muted-ink";
 
 export function SetupForm({ data }: { data: Data }) {
   const initial = useMemo(() => initialState(data), [data]);
   const [cats, setCats] = useState<CatState[]>(initial);
+  const initialInc = useMemo(() => initialIncomes(data), [data]);
+  const [incomes, setIncomes] = useState<IncomeState[]>(initialInc);
   const [defaultAlert, setDefaultAlert] = useState(String(data.defaultAlertPct));
   const [currency, setCurrency] = useState(`${data.currencySymbol}|${data.currencyCode}`);
   const [pending, start] = useTransition();
@@ -80,6 +87,7 @@ export function SetupForm({ data }: { data: Data }) {
 
   const dirty =
     JSON.stringify(cats) !== JSON.stringify(initial) ||
+    JSON.stringify(incomes) !== JSON.stringify(initialInc) ||
     defaultAlert !== String(data.defaultAlertPct) ||
     currency !== `${data.currencySymbol}|${data.currencyCode}`;
 
@@ -105,7 +113,9 @@ export function SetupForm({ data }: { data: Data }) {
     items: live.reduce((a, c) => a + c.items.filter((i) => !i.removed).length, 0),
     monthly: live.reduce((a, c) => a + monthlyCommit(c), 0),
     allocated: live.reduce((a, c) => a + (parseMoney(c.allocation) ?? 0), 0),
+    income: incomes.reduce((a, i) => a + (parseMoney(i.amount) ?? 0), 0),
   };
+  const unallocated = totals.income - totals.allocated;
 
   const copyCaps = () => {
     const prev = data.prevAllocations;
@@ -124,6 +134,11 @@ export function SetupForm({ data }: { data: Data }) {
         if (i.kind === "monthly" && !parseMoney(i.amount)) return void toast.error(`${i.name}: monthly items need an expected amount.`);
       }
     }
+    const incomeLines = incomes.filter((i) => i.source.trim() || i.amount.trim());
+    for (const i of incomeLines) {
+      if (!i.source.trim()) return void toast.error("Every income line needs a source.");
+      if (!parseMoney(i.amount)) return void toast.error(`${i.source}: enter an amount above zero (remove the line instead of 0).`);
+    }
     const names = live.map((c) => c.name.trim().toLowerCase());
     if (new Set(names).size !== names.length) return void toast.error("Two categories have the same name.");
 
@@ -133,6 +148,7 @@ export function SetupForm({ data }: { data: Data }) {
         defaultAlertPct: Number(defaultAlert) || 0,
         currencySymbol: symbol,
         currencyCode: code,
+        incomes: incomeLines.map((i) => ({ source: i.source, amount: parseMoney(i.amount)! })),
         categories: cats
           .filter((c) => c.id || !c.removed)
           .map((c) => ({
@@ -209,6 +225,62 @@ export function SetupForm({ data }: { data: Data }) {
       )}
       {missing && (
         <div className="card px-6 py-10 text-center text-[15px] text-muted-ink">No budget was set for {formatMonth(data.ym)}.</div>
+      )}
+
+      {!missing && (
+        <fieldset disabled={readOnly || pending} className="card m-0 flex min-w-0 flex-col gap-3 rounded-2xl px-5 py-[18px]">
+          <legend className="sr-only">Income</legend>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-[17px] font-semibold">Income · {monthName}</h2>
+            <span className="text-[13px] text-muted-ink">
+              Expected income for the month. What isn&apos;t budgeted shows as unallocated.
+            </span>
+          </div>
+          <div className="grid gap-x-6 gap-y-2 md:grid-cols-2">
+            {incomes.map((i) => (
+              <div key={i.key} className="grid grid-cols-[minmax(0,1fr)_150px_40px] items-center gap-2.5">
+                <input
+                  aria-label="Income source"
+                  placeholder="Source, e.g. Salary"
+                  autoFocus={!i.source && !i.amount}
+                  value={i.source}
+                  onChange={(e) => setIncomes((xs) => xs.map((x) => (x.key === i.key ? { ...x, source: e.target.value } : x)))}
+                  className={field}
+                />
+                <input
+                  aria-label={`Amount for ${i.source || "income"}`}
+                  inputMode="decimal"
+                  placeholder="0"
+                  value={i.amount}
+                  onChange={(e) => setIncomes((xs) => xs.map((x) => (x.key === i.key ? { ...x, amount: e.target.value } : x)))}
+                  className={cn(field, "text-right")}
+                />
+                <button
+                  type="button"
+                  aria-label={`Remove ${i.source || "income line"}`}
+                  onClick={() => setIncomes((xs) => xs.filter((x) => x.key !== i.key))}
+                  className="flex size-10 items-center justify-center rounded-[10px] text-muted-ink hover:bg-paper"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => setIncomes((xs) => [...xs, { key: newKey(), source: "", amount: "" }])}
+              className="flex min-h-10 items-center gap-1.5 rounded-[10px] px-2.5 text-sm font-semibold text-teal hover:bg-teal-wash"
+            >
+              <Plus aria-hidden className="size-4" /> Add income
+            </button>
+            {incomes.length > 0 && (
+              <span className="text-sm">
+                Total <b>{formatMoney(totals.income, symbol)}</b>
+              </span>
+            )}
+          </div>
+        </fieldset>
       )}
 
       {!missing && (
@@ -368,6 +440,14 @@ export function SetupForm({ data }: { data: Data }) {
           <Stat label="Items" value={String(totals.items)} />
           <Stat label="Monthly commitments" value={formatMoney(totals.monthly, symbol)} />
           <Stat label="Total allocated" value={formatMoney(totals.allocated, symbol)} strong />
+          {totals.income > 0 && <Stat label="Income" value={formatMoney(totals.income, symbol)} />}
+          {totals.income > 0 && (
+            <Stat
+              label={unallocated < 0 ? "Over-budgeted" : "Unallocated"}
+              value={formatMoney(Math.abs(unallocated), symbol)}
+              tone={unallocated < 0 ? "bad" : "ok"}
+            />
+          )}
         </dl>
         {!readOnly && (
           <div className="flex gap-2">
@@ -376,6 +456,7 @@ export function SetupForm({ data }: { data: Data }) {
               disabled={!dirty || pending}
               onClick={() => {
                 setCats(initial);
+                setIncomes(initialInc);
                 setDefaultAlert(String(data.defaultAlertPct));
                 setCurrency(`${data.currencySymbol}|${data.currencyCode}`);
               }}
@@ -398,11 +479,11 @@ export function SetupForm({ data }: { data: Data }) {
   );
 }
 
-function Stat({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+function Stat({ label, value, strong, tone }: { label: string; value: string; strong?: boolean; tone?: "ok" | "bad" }) {
   return (
     <div className="flex flex-col">
       <dt className="text-xs text-muted-ink">{label}</dt>
-      <dd className={cn("m-0 font-semibold", strong && "text-teal")}>{value}</dd>
+      <dd className={cn("m-0 font-semibold", strong && "text-teal", tone === "ok" && "text-ok", tone === "bad" && "text-bad")}>{value}</dd>
     </div>
   );
 }

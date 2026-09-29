@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, desc, eq, gte, isNull, lt, ne, or, sql, sum } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@/db";
-import { categories, categoryBudgets, categoryMonthSummary, expenses, items, monthlyItemStatus, months, transfers } from "@/db/schema";
+import { categories, categoryBudgets, categoryMonthSummary, expenses, incomes, items, monthlyItemStatus, months, transfers } from "@/db/schema";
 import { addMonths, currentYearMonth, daysInMonth, firstDay, monthOf, nextMonthStart, today } from "@/lib/dates";
 import { stateAfter } from "@/lib/budget";
 import { closeBlockers, ensureMonth, getMonth, getSettings, type Month } from "@/server/domain/months";
@@ -61,7 +61,12 @@ export async function getSummaries(db: Db, month: Month | null): Promise<Categor
     .where(eq(categoryMonthSummary.monthId, month.id))
     .orderBy(asc(categoryMonthSummary.sortOrder), asc(categoryMonthSummary.name));
   return rows
-    .filter((r) => !r.archivedAt || r.spent > 0 || r.transfersIn > 0 || r.transfersOut > 0 || r.swept > 0)
+    // Hide categories that have nothing to show this month: archived ones, or ones
+    // with no cap (e.g. a one-off that only mattered last month) and no activity.
+    .filter((r) => {
+      const active = r.spent > 0 || r.transfersIn > 0 || r.transfersOut > 0 || r.swept > 0;
+      return active || (!r.archivedAt && r.allocation > 0);
+    })
     .map((r) => ({
       categoryId: r.categoryId,
       name: r.name,
@@ -213,9 +218,19 @@ export async function getInbox(db: Db) {
   return { rows, summariesByMonth, catalog: await getCatalog(db), currency: settings.currencySymbol };
 }
 
+export async function getIncomes(db: Db, month: Month | null) {
+  if (!month) return [];
+  return db
+    .select({ id: incomes.id, source: incomes.source, amount: incomes.amount })
+    .from(incomes)
+    .where(eq(incomes.monthId, month.id))
+    .orderBy(asc(incomes.sortOrder), asc(incomes.createdAt));
+}
+
 export async function getDashboard(db: Db, ym: string) {
   const month = await getMonth(db, ym);
-  const [settings, summaries, monthly, daily] = await Promise.all([
+  const [income, settings, summaries, monthly, daily] = await Promise.all([
+    getIncomes(db, month),
     getSettings(db),
     getSummaries(db, month),
     getMonthlyItems(db, month),
@@ -259,6 +274,8 @@ export async function getDashboard(db: Db, ym: string) {
       uncategorized,
     },
     owed,
+    income,
+    incomeTotal: income.reduce((a, i) => a + i.amount, 0),
     weeks: weeks.map((w) => ({ label: w.label, total: w.total, days: w.to - w.from + 1 })),
     evenPacePerDay: days ? allocated / days : 0,
   };
@@ -368,7 +385,8 @@ export async function getSetupPage(db: Db, ym: string) {
   const month = ym >= cur ? await ensureMonth(db, ym) : await getMonth(db, ym);
   const prevYm = addMonths(ym, -1);
   const prev = await getMonth(db, prevYm);
-  const [settings, catalog, budgets, prevBudgets] = await Promise.all([
+  const [income, settings, catalog, budgets, prevBudgets] = await Promise.all([
+    getIncomes(db, month),
     getSettings(db),
     getCatalog(db),
     month ? db.select().from(categoryBudgets).where(eq(categoryBudgets.monthId, month.id)) : [],
@@ -382,6 +400,7 @@ export async function getSetupPage(db: Db, ym: string) {
     currencySymbol: settings.currencySymbol,
     currencyCode: settings.currencyCode,
     defaultAlertPct: month?.defaultAlertPct ?? settings.defaultAlertPct,
+    incomes: income.map((i) => ({ source: i.source, amount: i.amount })),
     prevAllocations: Object.fromEntries(prevBudgets.map((b) => [b.categoryId, b.allocation])) as Record<string, number>,
     categories: catalog.categories.map((c) => ({
       id: c.id,

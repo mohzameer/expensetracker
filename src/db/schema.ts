@@ -181,6 +181,22 @@ export const transfers = pgTable(
   ],
 );
 
+/** Expected income for a month, line by line (salary, commission, …). */
+export const incomes = pgTable(
+  "incomes",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    monthId: uuid()
+      .notNull()
+      .references(() => months.id),
+    source: text().notNull(),
+    amount: money().notNull(),
+    sortOrder: integer().notNull().default(0),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [check("incomes_amount_positive", sql`amount > 0`), index("incomes_month_idx").on(t.monthId)],
+);
+
 // ---- Derived views (created in drizzle/0001_views_triggers.sql) ----
 
 /** Per month and category: allocation, transfers, spend and remaining balance. */

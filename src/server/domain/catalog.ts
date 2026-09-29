@@ -1,6 +1,6 @@
 import { and, eq, isNull, max, or, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { categories, categoryBudgets, expenses, items, months, settings, transfers } from "@/db/schema";
+import { categories, categoryBudgets, expenses, incomes, items, months, settings, transfers } from "@/db/schema";
 import { UserError } from "@/lib/errors";
 import { CATEGORY_COLORS } from "@/lib/palette";
 import { assertOpen, ensureMonth, lockMonth } from "./months";
@@ -123,6 +123,8 @@ export type SetupPayload = {
   currencySymbol: string;
   currencyCode: string;
   categories: SetupCategory[];
+  /** The month's full list of income lines (replaces what's there). Omit to leave income untouched. */
+  incomes?: { source: string; amount: number }[];
 };
 
 /** Setup's single "Save all": everything in one transaction. */
@@ -133,6 +135,15 @@ export async function saveSetup(db: Db, p: SetupPayload) {
 
     await tx.update(settings).set({ currencySymbol: p.currencySymbol, currencyCode: p.currencyCode }).where(eq(settings.id, 1));
     await tx.update(months).set({ defaultAlertPct: p.defaultAlertPct }).where(eq(months.id, month.id));
+
+    if (p.incomes) {
+      await tx.delete(incomes).where(eq(incomes.monthId, month.id));
+      if (p.incomes.length) {
+        await tx.insert(incomes).values(
+          p.incomes.map((i, n) => ({ monthId: month.id, source: i.source.trim(), amount: i.amount, sortOrder: n })),
+        );
+      }
+    }
 
     const removedCats = p.categories.filter((c) => c.removed && c.id).map((c) => c.id!);
     for (const id of removedCats) await removeCategory(tx, id);

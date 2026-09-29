@@ -16,11 +16,18 @@ const TEXT = { green: "text-ok", amber: "text-warn", red: "text-bad" } as const;
 export function Dashboard({ data, today }: { data: Data; today: string }) {
   const { totals, currency } = data;
   const negatives = data.summaries.filter((s) => s.remaining < 0);
+  // At most 7 coloured slices; the rest fold into "Other" so colours never repeat.
+  const spent = data.summaries.filter((s) => s.spent > 0).sort((a, b) => b.spent - a.spent);
+  const top = spent.length > 8 ? spent.slice(0, 7) : spent;
+  const rest = spent.slice(top.length).reduce((a, s) => a + s.spent, 0) + totals.uncategorized;
   const slices = [
-    ...data.summaries.filter((s) => s.spent > 0).sort((a, b) => b.spent - a.spent).map((s) => ({ name: s.name, value: s.spent, color: s.color })),
-    ...(totals.uncategorized > 0 ? [{ name: "Needs category", value: totals.uncategorized, color: "var(--faint)" }] : []),
+    ...top.map((s) => ({ name: s.name, value: s.spent, color: s.color })),
+    ...(rest > 0
+      ? [{ name: spent.length > top.length ? (totals.uncategorized ? "Other + needs category" : "Other") : "Needs category", value: rest, color: "var(--faint)" }]
+      : []),
   ];
-  const weekPace = Math.round(data.evenPacePerDay * 7);
+  const unallocated = data.incomeTotal - totals.allocated;
+  const weekPace = Math.round((data.evenPacePerDay * 7) / 100) * 100; // whole rupees
   const closed = data.month?.status === "closed";
 
   return (
@@ -51,6 +58,34 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
         </div>
       ) : (
         <>
+          {data.income.length > 0 ? (
+            <section className="card flex flex-wrap items-center gap-x-8 gap-y-3 px-5 py-4" aria-label="Income">
+              <Figure label="Income" value={formatMoney(data.incomeTotal, currency)} />
+              <span aria-hidden className="text-xl text-faint">−</span>
+              <Figure label="Budgeted" value={formatMoney(totals.allocated, currency)} />
+              <span aria-hidden className="text-xl text-faint">=</span>
+              <Figure
+                label={unallocated < 0 ? "Over-budgeted" : "Unallocated"}
+                value={formatMoney(Math.abs(unallocated), currency)}
+                className={unallocated < 0 ? "text-bad" : "text-ok"}
+              />
+              <ul className="ml-auto flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-muted-ink">
+                {data.income.map((i) => (
+                  <li key={i.id}>
+                    {i.source} <span className="font-semibold text-ink">{formatAmount(i.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : (
+            <p className="-mt-2 text-[13px] text-muted-ink">
+              No income recorded for {formatMonth(data.ym, { month: "long" })}.{" "}
+              <Link href={`/setup?month=${data.ym}`} className="font-semibold text-teal underline">
+                Add it in Setup
+              </Link>
+            </p>
+          )}
+
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Tile label="Allocated" value={formatMoney(totals.allocated, currency)} sub={`${data.summaries.length} categories`} />
             <Tile
@@ -196,6 +231,15 @@ function Tile({ label, value, sub, valueClass }: { label: string; value: string;
       <span className="text-[13px] text-muted-ink">{label}</span>
       <span className={cn("font-display text-2xl font-semibold lg:text-[28px]", valueClass)}>{value}</span>
       <span className="text-[13px] text-muted-ink">{sub}</span>
+    </div>
+  );
+}
+
+function Figure({ label, value, className }: { label: string; value: string; className?: string }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-[13px] text-muted-ink">{label}</span>
+      <span className={cn("font-display text-xl font-semibold", className)}>{value}</span>
     </div>
   );
 }

@@ -15,6 +15,20 @@
       "when": 1790678682907,
       "tag": "0001_views_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790686378718,
+      "tag": "0002_incomes",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790686379197,
+      "tag": "0003_incomes_guard_item_due",
+      "breakpoints": true
     }
   ]
 }

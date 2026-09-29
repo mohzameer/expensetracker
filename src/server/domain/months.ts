@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, gte, isNull, lt } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { categories, categoryBudgets, categoryMonthSummary, expenses, months, settings, transfers } from "@/db/schema";
+import { categories, categoryBudgets, categoryMonthSummary, expenses, incomes, months, settings, transfers } from "@/db/schema";
 import { firstDay, formatDay, formatMonth, lastDay, nextMonthStart } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { UserError } from "@/lib/errors";
@@ -21,7 +21,7 @@ export async function getMonth(db: Db, ym: string): Promise<Month | null> {
 
 /**
  * Return the month row, creating it on first write. A new month copies the
- * allocations (not leftovers) and alert % of the latest earlier month.
+ * allocations (not leftovers), alert % and income lines of the latest earlier month.
  */
 export async function ensureMonth(db: Db, ym: string): Promise<Month> {
   const existing = await getMonth(db, ym);
@@ -53,6 +53,14 @@ export async function ensureMonth(db: Db, ym: string): Promise<Month> {
           allocation: byCat.get(c.id)?.allocation ?? 0,
           alertPct: byCat.get(c.id)?.alertPct ?? null,
         })),
+      );
+    }
+    const prevIncomes = source
+      ? await tx.select().from(incomes).where(eq(incomes.monthId, source.id)).orderBy(asc(incomes.sortOrder))
+      : [];
+    if (prevIncomes.length) {
+      await tx.insert(incomes).values(
+        prevIncomes.map((i) => ({ monthId: month.id, source: i.source, amount: i.amount, sortOrder: i.sortOrder })),
       );
     }
     return month;

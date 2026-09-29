@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { categoryBudgets, categoryMonthSummary, expenses, monthlyItemStatus, months } from "@/db/schema";
+import { categoryBudgets, categoryMonthSummary, expenses, incomes, monthlyItemStatus, months } from "@/db/schema";
 import { closeBlockers, closeMonth, ensureMonth, getMonth } from "@/server/domain/months";
 import { adjustSavings, getSavingsBalance, moveToCategory } from "@/server/domain/transfers";
 import { assignCategory, updateExpense } from "@/server/domain/expenses";
@@ -209,5 +209,51 @@ describe("setup", () => {
     const m = (await getMonth(db, "2026-09"))!;
     const rows = await db.select().from(categoryBudgets).where(eq(categoryBudgets.monthId, m.id));
     expect(rows.map((r) => r.categoryId)).not.toContain(s.dining.id);
+  });
+});
+
+describe("income", () => {
+  const setup = (ym: string, incomesList: { source: string; amount: number }[]) =>
+    saveSetup(db, { ym, defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR", categories: [], incomes: incomesList });
+
+  it("is saved per month, copied into a new month, and replaced on save", async () => {
+    await seedSeptember(db);
+    await setup("2026-09", [{ source: "Salary", amount: rs(653400) }, { source: "Com", amount: rs(566000) }]);
+    await ensureMonth(db, "2026-10");
+    const oct = (await getMonth(db, "2026-10"))!;
+    const rows = await db.select().from(incomes).where(eq(incomes.monthId, oct.id));
+    expect(rows.map((r) => [r.source, r.amount])).toEqual([["Salary", rs(653400)], ["Com", rs(566000)]]);
+
+    await setup("2026-10", [{ source: "Salary", amount: rs(700000) }]);
+    const after = await db.select().from(incomes).where(eq(incomes.monthId, oct.id));
+    expect(after.map((r) => r.amount)).toEqual([rs(700000)]);
+  });
+
+  it("is read-only once the month is closed", async () => {
+    await seedSeptember(db);
+    await setup("2026-09", [{ source: "Salary", amount: rs(1000) }]);
+    await closeMonth(db, "2026-09", "2026-10-01");
+    await expect(setup("2026-09", [])).rejects.toThrow(/closed/);
+    await expect(db.delete(incomes)).rejects.toThrow();
+  });
+});
+
+describe("monthly items and caps", () => {
+  it("are not due in a month where their category has no cap", async () => {
+    const s = await seedSeptember(db);
+    const due = async () => {
+      const m = (await getMonth(db, "2026-09"))!;
+      return (await db.select().from(monthlyItemStatus).where(eq(monthlyItemStatus.monthId, m.id))).map((r) => r.name);
+    };
+    expect(await due()).toContain("Internet");
+    await saveSetup(db, {
+      ym: "2026-09", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
+      categories: [{ id: s.utilities.id, name: "Utilities", color: "#00897B", allocation: 0, alertPct: null, removed: false,
+        items: [{ id: s.internet.id, name: "Internet", kind: "monthly", expectedAmount: rs(3990), defaultAmount: null, removed: false }] }],
+    });
+    expect(await due()).not.toContain("Internet");
+    // Paying it anyway brings it back, so the payment is never hidden.
+    await s.expense(s.utilities.id, rs(100), "2026-09-12", s.internet.id);
+    expect(await due()).toContain("Internet");
   });
 });

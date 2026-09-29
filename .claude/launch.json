@@ -1,6 +1,7 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "ledger", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 3000 }
+    { "name": "ledger", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 3000 },
+    { "name": "ledger-local-db", "runtimeExecutable": "env", "runtimeArgs": ["DATABASE_URL=pglite://.data/dev", "npm", "run", "dev"], "port": 3000 }
   ]
 }
