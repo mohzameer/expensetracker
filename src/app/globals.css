@@ -1,0 +1,140 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Ledger palette — lifted from the design canvas. Light only. */
+:root {
+  --paper: #f3f1ea;
+  --surface: #ffffff;
+  --ink: #1b1a17;
+  --ink-soft: #3d3b35;
+  --muted-ink: #5e5b53;
+  --faint: #9c978a;
+  --line: #e2ded3;
+  --line-soft: #eeebe2;
+  --line-strong: #d6d2c6;
+  --teal: #1f5f5b;
+  --teal-deep: #123f3c;
+  --teal-wash: #f1f6f5;
+  --ok: #1e6b3f;
+  --ok-bar: #2f8a55;
+  --ok-bg: #e6f2ea;
+  --warn: #7a4200;
+  --warn-bar: #c77a1a;
+  --warn-bg: #fcefd6;
+  --bad: #a3261b;
+  --bad-bar: #c0392b;
+  --bad-bg: #fbe4e1;
+  --lock-bg: #e9e6dd;
+  --scrim: #5a5852;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: #ffffff;
+  --secondary: var(--paper);
+  --secondary-foreground: var(--ink);
+  --muted: var(--line-soft);
+  --muted-foreground: var(--muted-ink);
+  --accent: var(--paper);
+  --accent-foreground: var(--ink);
+  --destructive: var(--bad);
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--teal);
+  --radius: 0.875rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-muted-ink: var(--muted-ink);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-line-strong: var(--line-strong);
+  --color-teal: var(--teal);
+  --color-teal-deep: var(--teal-deep);
+  --color-teal-wash: var(--teal-wash);
+  --color-ok: var(--ok);
+  --color-ok-bar: var(--ok-bar);
+  --color-ok-bg: var(--ok-bg);
+  --color-warn: var(--warn);
+  --color-warn-bar: var(--warn-bar);
+  --color-warn-bg: var(--warn-bg);
+  --color-bad: var(--bad);
+  --color-bad-bar: var(--bad-bar);
+  --color-bad-bg: var(--bad-bg);
+  --color-lock-bg: var(--lock-bg);
+  --color-scrim: var(--scrim);
+
+  --font-sans: var(--font-body), system-ui, sans-serif;
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-heading: var(--font-display);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-variant-numeric: tabular-nums;
+  }
+  a {
+    color: inherit;
+  }
+}
+
+@utility eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-ink);
+}
+
+@utility card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}

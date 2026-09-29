@@ -1,0 +1,213 @@
+import { beforeEach, describe, expect, it } from "vitest";
+import { and, eq } from "drizzle-orm";
+import type { Db } from "@/db/client";
+import { categoryBudgets, categoryMonthSummary, expenses, monthlyItemStatus, months } from "@/db/schema";
+import { closeBlockers, closeMonth, ensureMonth, getMonth } from "@/server/domain/months";
+import { adjustSavings, getSavingsBalance, moveToCategory } from "@/server/domain/transfers";
+import { assignCategory, updateExpense } from "@/server/domain/expenses";
+import { createItem, removeCategory, saveSetup } from "@/server/domain/catalog";
+import { freshDb, rs, seedSeptember } from "./helpers";
+
+let db: Db;
+beforeEach(async () => {
+  db = await freshDb();
+});
+
+async function summary(ym: string, categoryId: string) {
+  const m = (await getMonth(db, ym))!;
+  const [s] = await db
+    .select()
+    .from(categoryMonthSummary)
+    .where(and(eq(categoryMonthSummary.monthId, m.id), eq(categoryMonthSummary.categoryId, categoryId)));
+  return s;
+}
+
+describe("category summary", () => {
+  it("remaining = allocation + in − out − spent", async () => {
+    const s = await seedSeptember(db);
+    await s.expense(s.dining.id, rs(13350));
+    await s.expense(s.groceries.id, rs(17600));
+    const res = await s.expense(s.groceries.id, rs(100), "2026-10-02"); // other month
+    expect(res.category?.remaining).toBe(rs(30000) - rs(100));
+
+    expect((await summary("2026-09", s.dining.id)).remaining).toBe(rs(-1350));
+    await moveToCategory(db, {
+      ym: "2026-09",
+      toCategoryId: s.dining.id,
+      source: { kind: "category", categoryId: s.groceries.id },
+      amount: rs(1350),
+      todayStr: "2026-09-29",
+    });
+    const dining = await summary("2026-09", s.dining.id);
+    expect(dining.effectiveAllocation).toBe(rs(13350));
+    expect(dining.remaining).toBe(0);
+    expect((await summary("2026-09", s.groceries.id)).remaining).toBe(rs(30000 - 17600 - 1350));
+  });
+
+  it("returns the authoritative state on save", async () => {
+    const s = await seedSeptember(db);
+    const r = await s.expense(s.dining.id, rs(11000));
+    expect(r.category?.state).toBe("amber");
+    const r2 = await s.expense(s.dining.id, rs(2000));
+    expect(r2.category?.state).toBe("red");
+  });
+
+  it("rejects an item from another category", async () => {
+    const s = await seedSeptember(db);
+    await expect(s.expense(s.groceries.id, rs(10), "2026-09-10", s.internet.id)).rejects.toThrow(/doesn't belong/);
+  });
+});
+
+describe("covers", () => {
+  it("cannot take a source below zero", async () => {
+    const s = await seedSeptember(db);
+    await s.expense(s.dining.id, rs(13000));
+    await s.expense(s.groceries.id, rs(29500));
+    await expect(
+      moveToCategory(db, {
+        ym: "2026-09",
+        toCategoryId: s.dining.id,
+        source: { kind: "category", categoryId: s.groceries.id },
+        amount: rs(1000),
+        todayStr: "2026-09-29",
+      }),
+    ).rejects.toThrow(/Only Rs 500/);
+    await expect(
+      moveToCategory(db, { ym: "2026-09", toCategoryId: s.dining.id, source: { kind: "savings" }, amount: rs(1000), todayStr: "2026-09-29" }),
+    ).rejects.toThrow(/Savings only has Rs 0/);
+
+    await adjustSavings(db, { direction: "in", amount: rs(5000), note: "Starting balance", todayStr: "2026-09-29" });
+    await moveToCategory(db, { ym: "2026-09", toCategoryId: s.dining.id, source: { kind: "savings" }, amount: rs(1000), todayStr: "2026-09-29" });
+    expect(await getSavingsBalance(db)).toBe(rs(4000));
+    expect((await summary("2026-09", s.dining.id)).remaining).toBe(0);
+  });
+});
+
+describe("monthly items", () => {
+  it("unpaid → partial → paid → overpaid", async () => {
+    const s = await seedSeptember(db);
+    const status = async () => {
+      const m = (await getMonth(db, "2026-09"))!;
+      const [row] = await db
+        .select()
+        .from(monthlyItemStatus)
+        .where(and(eq(monthlyItemStatus.monthId, m.id), eq(monthlyItemStatus.itemId, s.internet.id)));
+      return row;
+    };
+    expect((await status()).status).toBe("unpaid");
+    await s.expense(s.utilities.id, rs(2000), "2026-09-05", s.internet.id);
+    expect(await status()).toMatchObject({ status: "partial", paid: rs(2000), expected: rs(3990) });
+    await s.expense(s.utilities.id, rs(1990), "2026-09-20", s.internet.id);
+    expect((await status()).status).toBe("paid");
+    await s.expense(s.utilities.id, rs(450), "2026-09-21", s.internet.id);
+    expect((await status()).paid).toBe(rs(4440));
+  });
+});
+
+describe("new months", () => {
+  it("copy allocations (not leftovers) from the previous month", async () => {
+    const s = await seedSeptember(db);
+    await s.expense(s.groceries.id, rs(5000));
+    await ensureMonth(db, "2026-10");
+    expect((await summary("2026-10", s.groceries.id)).allocation).toBe(rs(30000));
+    expect((await summary("2026-10", s.groceries.id)).remaining).toBe(rs(30000));
+  });
+});
+
+describe("month close", () => {
+  it("is blocked until the month has ended, is categorised and nothing is negative", async () => {
+    const s = await seedSeptember(db);
+    const inbox = await s.expense(null, rs(780));
+    await s.expense(s.dining.id, rs(13350));
+    await s.expense(s.groceries.id, rs(17600));
+
+    await expect(closeMonth(db, "2026-09", "2026-09-29")).rejects.toThrow(/can be closed from/);
+    await expect(closeMonth(db, "2026-09", "2026-10-01")).rejects.toThrow(/Assign a category/);
+    await assignCategory(db, inbox.expense.id, s.groceries.id);
+    await expect(closeMonth(db, "2026-09", "2026-10-01")).rejects.toThrow(/Cover Dining/);
+    await moveToCategory(db, {
+      ym: "2026-09",
+      toCategoryId: s.dining.id,
+      source: { kind: "category", categoryId: s.groceries.id },
+      amount: rs(1350),
+      todayStr: "2026-09-30",
+    });
+    expect(await closeBlockers(db, "2026-09", "2026-09-30")).toMatchObject({ notEnded: false, uncategorized: 0, negative: [] });
+
+    const { swept } = await closeMonth(db, "2026-09", "2026-09-30");
+    // Groceries 30,000 − 17,600 − 780 − 1,350 + Utilities 18,000 + Dining 0
+    expect(swept).toBe(rs(10270 + 18000));
+    expect(await getSavingsBalance(db)).toBe(rs(28270));
+    expect((await getMonth(db, "2026-09"))!.status).toBe("closed");
+    const g = await summary("2026-09", s.groceries.id);
+    expect(g.swept).toBe(rs(10270));
+  });
+
+  it("requires earlier months to be closed first", async () => {
+    await seedSeptember(db);
+    await ensureMonth(db, "2026-10");
+    await expect(closeMonth(db, "2026-10", "2026-11-01")).rejects.toThrow(/Close September 2026 first/);
+  });
+
+  it("makes the month read-only, in the app and in the database", async () => {
+    const s = await seedSeptember(db);
+    const e = await s.expense(s.groceries.id, rs(100));
+    await closeMonth(db, "2026-09", "2026-10-01");
+
+    await expect(s.expense(s.groceries.id, rs(100), "2026-09-15")).rejects.toThrow(/closed and read-only/);
+    await expect(
+      updateExpense(db, e.expense.id, { spentOn: "2026-10-01", categoryId: s.groceries.id, itemId: null, amount: 1, note: null }),
+    ).rejects.toThrow(/closed/);
+    // Bypass the app: the triggers still refuse.
+    await expect(db.update(expenses).set({ amount: 1 }).where(eq(expenses.id, e.expense.id))).rejects.toThrow();
+    await expect(db.delete(expenses).where(eq(expenses.id, e.expense.id))).rejects.toThrow();
+    await expect(db.update(categoryBudgets).set({ allocation: 1 })).rejects.toThrow();
+    await expect(db.update(months).set({ defaultAlertPct: 5 })).rejects.toThrow();
+    await expect(
+      moveToCategory(db, { ym: "2026-09", toCategoryId: s.dining.id, source: { kind: "savings" }, amount: 1, todayStr: "2026-10-01" }),
+    ).rejects.toThrow(/closed/);
+  });
+});
+
+describe("setup", () => {
+  it("saves everything at once and archives categories with history", async () => {
+    const s = await seedSeptember(db);
+    await s.expense(s.dining.id, rs(500));
+    const extra = await createItem(db, { categoryId: s.groceries.id, name: "Keells", kind: "one_off" });
+
+    await saveSetup(db, {
+      ym: "2026-09",
+      defaultAlertPct: 15,
+      currencySymbol: "Rs",
+      currencyCode: "LKR",
+      categories: [
+        {
+          id: s.groceries.id, name: "Food", color: "#1F5F5B", allocation: rs(25000), alertPct: 20, removed: false,
+          items: [{ id: extra.id, name: "Keells", kind: "one_off", expectedAmount: null, defaultAmount: rs(2500), removed: false }],
+        },
+        { id: s.dining.id, name: "Dining", color: "#E08A3C", allocation: rs(12000), alertPct: null, removed: true, items: [] },
+        {
+          id: null, name: "Pharmacy", color: "#7A6FB0", allocation: rs(4000), alertPct: null, removed: false,
+          items: [{ id: null, name: "Meds", kind: "monthly", expectedAmount: rs(1500), defaultAmount: null, removed: false }],
+        },
+      ],
+    });
+
+    const food = await summary("2026-09", s.groceries.id);
+    expect(food).toMatchObject({ name: "Food", allocation: rs(25000), alertPct: 20 });
+    // Dining had spending → archived, still visible with its history.
+    const dining = await summary("2026-09", s.dining.id);
+    expect(dining.archivedAt).not.toBeNull();
+    expect(dining.spent).toBe(rs(500));
+    // Utilities was left out of the payload entirely → untouched.
+    expect((await summary("2026-09", s.utilities.id)).allocation).toBe(rs(18000));
+  });
+
+  it("deletes categories without history", async () => {
+    const s = await seedSeptember(db);
+    await removeCategory(db, s.dining.id);
+    const m = (await getMonth(db, "2026-09"))!;
+    const rows = await db.select().from(categoryBudgets).where(eq(categoryBudgets.monthId, m.id));
+    expect(rows.map((r) => r.categoryId)).not.toContain(s.dining.id);
+  });
+});
