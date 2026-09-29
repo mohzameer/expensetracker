@@ -1,0 +1,9 @@
+# Never upload local secrets or the local database
+.env*
+!.env.example
+.data
+.neon
+.claude
+.next
+node_modules
+tests
