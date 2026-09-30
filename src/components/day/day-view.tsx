@@ -248,8 +248,18 @@ export function DayView({ data }: { data: DayData }) {
                     />
                   ))
                 ) : (
-                  <li key={group[0].categoryId} className="flex flex-col">
-                    <ul className="flex flex-col">
+                  <li key={group[0].categoryId} className="flex flex-col gap-1.5 px-3.5 pt-3 pb-2">
+                    {/* Quiet caption on top; a rail in the category's colour ties its items together. */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="text-xs text-muted-ink">
+                        {group[0].categoryName} · {group.length} · {formatAmount(group.reduce((a, e) => a + e.amount, 0))}
+                      </span>
+                      {!closed && summary && <CategoryStatus summary={summary} currency={data.currency} onCover={cover} />}
+                    </div>
+                    <ul
+                      className="ml-0.5 flex flex-col border-l-2 pl-3"
+                      style={{ borderColor: `color-mix(in oklab, ${group[0].color ?? "var(--faint)"} 55%, transparent)` }}
+                    >
                       {group.map((e) => (
                         <EntryRow
                           key={e.id}
@@ -257,18 +267,12 @@ export function DayView({ data }: { data: DayData }) {
                           currency={data.currency}
                           readOnly={closed}
                           pending={e.id.startsWith("pending-")}
-                          hideCategory
+                          nested
                           onEdit={() => openSheet({ kind: "edit", expense: e })}
                           onCover={cover}
                         />
                       ))}
                     </ul>
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3.5 pt-0.5 pb-3">
-                      <span className="text-xs text-muted-ink">
-                        {group[0].categoryName} · {group.length} entries · {formatAmount(group.reduce((a, e) => a + e.amount, 0))}
-                      </span>
-                      {!closed && summary && <CategoryStatus summary={summary} currency={data.currency} onCover={cover} />}
-                    </div>
                   </li>
                 );
               })}
@@ -411,7 +415,7 @@ function EntryRow({
   pending,
   onEdit,
   onCover,
-  hideCategory = false,
+  nested = false,
 }: {
   expense: ExpenseRow;
   /** The category's balance line; omitted when a group shows it once. */
@@ -421,10 +425,11 @@ function EntryRow({
   pending: boolean;
   onEdit: () => void;
   onCover: () => void;
-  hideCategory?: boolean;
+  /** Inside a category group: no category in the subtitle, tighter padding. */
+  nested?: boolean;
 }) {
   const title = e.itemName ?? e.note ?? e.categoryName ?? "Unlabelled";
-  const subtitle = [hideCategory ? null : e.categoryName, e.itemName && e.note ? e.note : null, e.accountId ? null : "not deducted"]
+  const subtitle = [nested ? null : e.categoryName, e.itemName && e.note ? e.note : null, e.accountId ? null : "not deducted"]
     .filter(Boolean)
     .join(" · ");
 
@@ -445,9 +450,13 @@ function EntryRow({
   return (
     <li className={cn("flex flex-col", pending && "opacity-60")}>
       {readOnly ? (
-        <div className="flex items-center gap-3 px-3.5 py-3">{body}</div>
+        <div className={cn("flex items-center gap-3", nested ? "py-2" : "px-3.5 py-3")}>{body}</div>
       ) : (
-        <button onClick={onEdit} disabled={pending} className="flex items-start gap-3 px-3.5 pt-3 pb-3 text-left hover:bg-paper/60">
+        <button
+          onClick={onEdit}
+          disabled={pending}
+          className={cn("flex items-start gap-3 text-left hover:bg-paper/60", nested ? "py-2" : "px-3.5 pt-3 pb-3")}
+        >
           {body}
         </button>
       )}
