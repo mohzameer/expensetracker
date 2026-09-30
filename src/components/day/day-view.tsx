@@ -27,7 +27,6 @@ export function DayView({ data }: { data: DayData }) {
   });
 
   const [sheet, setSheet] = useState<{ open: boolean; key: number; mode: ExpenseSheetMode }>({ open: false, key: 0, mode: { kind: "add" } });
-  const [dueOpen, setDueOpen] = useState(false);
   const [cover, setCover] = useState<{ open: boolean; key: number; categoryId: string | null }>({ open: false, key: 0, categoryId: null });
 
   const openSheet = (mode: ExpenseSheetMode) => setSheet((s) => ({ open: true, key: s.key + 1, mode }));
@@ -87,6 +86,7 @@ export function DayView({ data }: { data: DayData }) {
   };
 
   const due = data.monthly.filter((m) => m.status !== "paid");
+  const paid = data.monthly.filter((m) => m.status === "paid");
   const coverTarget = summaryOf(cover.categoryId);
   const isToday = data.date === data.today;
 
@@ -180,40 +180,35 @@ export function DayView({ data }: { data: DayData }) {
       </header>
 
       <main className="flex flex-1 flex-col gap-[18px] px-4 pt-1 pb-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:px-0">
-        {!closed && due.length > 0 && (
-          <section className="flex flex-col gap-2 lg:order-2">
-            {/* Folded by default on phones so today's entries stay on screen; always open on desktop. */}
-            <h2 className="m-0">
-              <button
-                type="button"
-                aria-expanded={dueOpen}
-                aria-controls="due-list"
-                onClick={() => setDueOpen((o) => !o)}
-                className={cn(
-                  "flex w-full items-center gap-2 text-left lg:pointer-events-none",
-                  !dueOpen && "card min-h-12 px-3.5 lg:min-h-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:px-0",
-                )}
+        {!closed && (due.length > 0 || paid.length > 0) && (
+          <div className="flex flex-col gap-[18px] lg:order-2">
+            {due.length > 0 && (
+              <FoldSection
+                id="due-list"
+                title={`Due this month · ${due.length}`}
+                summary={formatMoney(due.reduce((a, d) => a + d.expected - d.paid, 0), data.currency)}
               >
-                <span className="eyebrow flex-1">Due this month · {due.length}</span>
-                <span className={cn("text-sm font-semibold", dueOpen && "hidden", "lg:hidden")}>
-                  {formatMoney(due.reduce((a, d) => a + d.expected - d.paid, 0), data.currency)}
-                </span>
-                <ChevronDown
-                  aria-hidden
-                  className={cn("size-[18px] text-muted-ink transition-transform lg:hidden", dueOpen && "rotate-180")}
-                />
-              </button>
-            </h2>
-            <ul id="due-list" className={cn("card flex-col divide-y divide-line-soft", dueOpen ? "flex" : "hidden lg:flex")}>
-              {due.map((d) => (
-                <DueRow
-                  key={d.itemId}
-                  item={d}
-                  onLog={() => openSheet({ kind: "add", prefill: { categoryId: d.categoryId, itemId: d.itemId, amount: d.expected - d.paid } })}
-                />
-              ))}
-            </ul>
-          </section>
+                {due.map((d) => (
+                  <DueRow
+                    key={d.itemId}
+                    item={d}
+                    onLog={() => openSheet({ kind: "add", prefill: { categoryId: d.categoryId, itemId: d.itemId, amount: d.expected - d.paid } })}
+                  />
+                ))}
+              </FoldSection>
+            )}
+            {paid.length > 0 && (
+              <FoldSection
+                id="paid-list"
+                title={`Paid this month · ${paid.length}`}
+                summary={formatMoney(paid.reduce((a, d) => a + d.paid, 0), data.currency)}
+              >
+                {paid.map((d) => (
+                  <PaidRow key={d.itemId} item={d} />
+                ))}
+              </FoldSection>
+            )}
+          </div>
         )}
 
         <section className="flex flex-col gap-2 lg:order-1">
@@ -290,6 +285,53 @@ export function DayView({ data }: { data: DayData }) {
         />
       )}
     </div>
+  );
+}
+
+/** Folded to one row on phones (count + total), always open on desktop. */
+function FoldSection({ id, title, summary, children }: { id: string; title: string; summary: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="m-0">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={id}
+          onClick={() => setOpen((o) => !o)}
+          className={cn(
+            "flex w-full items-center gap-2 text-left lg:pointer-events-none",
+            !open && "card min-h-12 px-3.5 lg:min-h-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:px-0",
+          )}
+        >
+          <span className="eyebrow flex-1">{title}</span>
+          <span className={cn("text-sm font-semibold", open && "hidden", "lg:hidden")}>{summary}</span>
+          <ChevronDown aria-hidden className={cn("size-[18px] text-muted-ink transition-transform lg:hidden", open && "rotate-180")} />
+        </button>
+      </h2>
+      <ul id={id} className={cn("card flex-col divide-y divide-line-soft", open ? "flex" : "hidden lg:flex")}>
+        {children}
+      </ul>
+    </section>
+  );
+}
+
+function PaidRow({ item }: { item: DueItem }) {
+  const over = item.paid - item.expected;
+  return (
+    <li className="flex items-center gap-3 py-2.5 pr-3.5 pl-3.5">
+      <span aria-label="Paid" className="flex size-[18px] shrink-0 items-center justify-center rounded-full bg-ok">
+        <Check aria-hidden className="size-3 text-white" strokeWidth={3} />
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-[15px] font-medium">{item.name}</span>
+        <span className="truncate text-xs text-muted-ink">{item.categoryName}</span>
+      </div>
+      <div className="flex flex-col items-end gap-0.5">
+        <span className="text-[15px] font-medium">{formatAmount(item.paid)}</span>
+        {over > 0 && <span className="text-[11px] font-semibold text-warn">paid +{formatAmount(over)}</span>}
+      </div>
+    </li>
   );
 }
 
