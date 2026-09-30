@@ -151,7 +151,7 @@ export function DayView({ data }: { data: DayData }) {
           <Link
             href={`/charts?from=${encodeURIComponent(`/day/${data.date}`)}`}
             aria-label="Open spending charts"
-            className="flex items-end justify-between rounded-[18px] bg-teal px-[18px] py-4 text-white active:opacity-90"
+            className="relative flex items-end justify-between rounded-[18px] bg-teal px-[18px] py-4 text-white active:opacity-90"
           >
             <div className="flex flex-col gap-1">
               <span className="text-[13px] opacity-85">Spent {isToday ? "today" : "this day"}</span>
@@ -164,7 +164,11 @@ export function DayView({ data }: { data: DayData }) {
                 <span className="text-xs opacity-85">of {formatMoney(data.totals.allocated, data.currency)} allocated</span>
               </div>
             )}
-            <BarChart3 aria-hidden className="mb-1 ml-2 size-4 shrink-0 opacity-70" />
+            {/* Faint hint, top centre (always clear of the figures), that the bar opens the charts. */}
+            <BarChart3
+              aria-hidden
+              className="pointer-events-none absolute top-3.5 left-1/2 size-5 -translate-x-1/2 opacity-30"
+            />
           </Link>
         )}
 
