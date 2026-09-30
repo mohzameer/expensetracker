@@ -2,19 +2,18 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Archive, Check, Lock, Plus, Undo2, X } from "lucide-react";
+import { Archive, Lock, Plus, Undo2, X } from "lucide-react";
 import { MonthHeader } from "@/components/page-header";
 import { saveSetupAction } from "@/server/actions";
 import type { getSetupPage } from "@/server/queries";
-import { formatDay, formatMonth } from "@/lib/dates";
-import { formatAmount, formatMoney, parseMoney, toInputValue } from "@/lib/money";
+import { formatMonth } from "@/lib/dates";
+import { formatMoney, parseMoney, toInputValue } from "@/lib/money";
 import { CATEGORY_COLORS } from "@/lib/palette";
 import { cn } from "@/lib/utils";
 
 type Data = Awaited<ReturnType<typeof getSetupPage>>;
 type Kind = "monthly" | "one_off";
 type ItemState = { key: string; id: string | null; name: string; kind: Kind; amount: string; removed: boolean };
-type IncomeState = { key: string; source: string; amount: string; accountId: string };
 type CatState = {
   key: string;
   id: string | null;
@@ -60,23 +59,12 @@ function initialState(data: Data): CatState[] {
   }));
 }
 
-function initialIncomes(data: Data): IncomeState[] {
-  return data.incomes
-    .filter((i) => i.status === "expected")
-    .map((i, n) => ({ key: `inc-${n}`, source: i.source, amount: toInputValue(i.amount), accountId: i.accountId ?? "" }));
-}
-
 const field = "min-h-10 w-full rounded-[10px] border border-line-strong bg-surface px-2.5 text-[15px] outline-none focus:border-teal disabled:bg-paper";
 const label = "text-xs font-semibold text-muted-ink";
 
 export function SetupForm({ data }: { data: Data }) {
   const initial = useMemo(() => initialState(data), [data]);
   const [cats, setCats] = useState<CatState[]>(initial);
-  const initialInc = useMemo(() => initialIncomes(data), [data]);
-  const [incomes, setIncomes] = useState<IncomeState[]>(initialInc);
-  const receivedLines = data.incomes.filter((i) => i.status === "received");
-  const initialDefault = { source: data.defaultIncome.source, amount: toInputValue(data.defaultIncome.amount) };
-  const [defaultIncome, setDefaultIncome] = useState(initialDefault);
   const [defaultAlert, setDefaultAlert] = useState(String(data.defaultAlertPct));
   const [currency, setCurrency] = useState(`${data.currencySymbol}|${data.currencyCode}`);
   const [defaultAccount, setDefaultAccount] = useState(data.defaultAccountId ?? "");
@@ -93,8 +81,6 @@ export function SetupForm({ data }: { data: Data }) {
 
   const dirty =
     JSON.stringify(cats) !== JSON.stringify(initial) ||
-    JSON.stringify(incomes) !== JSON.stringify(initialInc) ||
-    JSON.stringify(defaultIncome) !== JSON.stringify(initialDefault) ||
     defaultAlert !== String(data.defaultAlertPct) ||
     currency !== `${data.currencySymbol}|${data.currencyCode}` ||
     defaultAccount !== (data.defaultAccountId ?? "");
@@ -121,17 +107,15 @@ export function SetupForm({ data }: { data: Data }) {
     items: live.reduce((a, c) => a + c.items.filter((i) => !i.removed).length, 0),
     monthly: live.reduce((a, c) => a + monthlyCommit(c), 0),
     allocated: live.reduce((a, c) => a + (parseMoney(c.allocation) ?? 0), 0),
-    expected: incomes.reduce((a, i) => a + (parseMoney(i.amount) ?? 0), 0),
   };
-  // Live version of the dashboard's "free after the month" while you edit caps and income.
+  // Live version of the dashboard's "free after the month" while you edit caps.
   const pb = data.planBase;
   const freeAfter = !pb
     ? null
     : pb.kind === "current"
-      ? pb.base +
-        totals.expected -
+      ? pb.base -
         live.reduce((a, c) => a + Math.max((parseMoney(c.allocation) ?? 0) + (c.id ? (pb.deltas[c.id] ?? 0) : 0), 0), 0)
-      : pb.base + totals.expected - totals.allocated;
+      : pb.base - totals.allocated;
 
   const copyCaps = () => {
     const prev = data.prevAllocations;
@@ -150,12 +134,6 @@ export function SetupForm({ data }: { data: Data }) {
         if (i.kind === "monthly" && !parseMoney(i.amount)) return void toast.error(`${i.name}: monthly items need an expected amount.`);
       }
     }
-    const incomeLines = incomes.filter((i) => i.source.trim() || i.amount.trim());
-    for (const i of incomeLines) {
-      if (!i.source.trim()) return void toast.error("Every income line needs a source.");
-      if (!i.accountId && data.accounts.length) return void toast.error(`${i.source}: choose which account it goes into.`);
-      if (!parseMoney(i.amount)) return void toast.error(`${i.source}: enter an amount above zero (remove the line instead of 0).`);
-    }
     const names = live.map((c) => c.name.trim().toLowerCase());
     if (new Set(names).size !== names.length) return void toast.error("Two categories have the same name.");
 
@@ -165,9 +143,7 @@ export function SetupForm({ data }: { data: Data }) {
         defaultAlertPct: Number(defaultAlert) || 0,
         currencySymbol: symbol,
         currencyCode: code,
-        incomes: incomeLines.map((i) => ({ source: i.source, amount: parseMoney(i.amount)!, accountId: i.accountId || null })),
         defaultAccountId: defaultAccount || null,
-        defaultIncome: { source: defaultIncome.source, amount: parseMoney(defaultIncome.amount) || null },
         categories: cats
           .filter((c) => c.id || !c.removed)
           .map((c) => ({
@@ -255,98 +231,6 @@ export function SetupForm({ data }: { data: Data }) {
       )}
       {missing && (
         <div className="card px-6 py-10 text-center text-[15px] text-muted-ink">No budget was set for {formatMonth(data.ym)}.</div>
-      )}
-
-      {!missing && (
-        <fieldset disabled={readOnly || pending} className="card m-0 flex min-w-0 flex-col gap-3 rounded-2xl px-5 py-[18px]">
-          <legend className="sr-only">Income</legend>
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="text-[17px] font-semibold">Income · {monthName}</h2>
-            <span className="text-[13px] text-muted-ink">
-              Choose the account each line goes into. Mark it received on the Dashboard when the money arrives.
-            </span>
-          </div>
-          {receivedLines.length > 0 && (
-            <ul className="flex flex-wrap gap-2">
-              {receivedLines.map((i) => (
-                <li key={i.id} className="flex min-h-9 items-center gap-2 rounded-full bg-ok-bg/70 px-3 text-sm">
-                  <Check aria-label="Received" className="size-4 text-ok" strokeWidth={2.5} />
-                  {i.source} <b>{formatAmount(i.amount)}</b>
-                  {i.accountName && <span className="text-xs text-muted-ink">→ {i.accountName}</span>}
-                  <span className="text-xs text-muted-ink">received {i.receivedOn ? formatDay(i.receivedOn, { day: "numeric", month: "short" }) : ""}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="grid gap-x-6 gap-y-2 md:grid-cols-2">
-            {incomes.map((i) => (
-              <div key={i.key} className="grid grid-cols-[minmax(0,1fr)_120px_130px_40px] items-center gap-2.5">
-                <input
-                  aria-label="Income source"
-                  placeholder="Expected, e.g. Salary"
-                  autoFocus={!i.source && !i.amount}
-                  value={i.source}
-                  onChange={(e) => setIncomes((xs) => xs.map((x) => (x.key === i.key ? { ...x, source: e.target.value } : x)))}
-                  className={field}
-                />
-                <select
-                  aria-label={`Account for ${i.source || "income"}`}
-                  value={i.accountId}
-                  onChange={(e) => setIncomes((xs) => xs.map((x) => (x.key === i.key ? { ...x, accountId: e.target.value } : x)))}
-                  className={field}
-                >
-                  <option value="" disabled>Into…</option>
-                  {data.accounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-                <input
-                  aria-label={`Amount for ${i.source || "income"}`}
-                  inputMode="decimal"
-                  placeholder="0"
-                  value={i.amount}
-                  onChange={(e) => setIncomes((xs) => xs.map((x) => (x.key === i.key ? { ...x, amount: e.target.value } : x)))}
-                  className={cn(field, "text-right")}
-                />
-                <button
-                  type="button"
-                  aria-label={`Remove ${i.source || "income line"}`}
-                  onClick={() => setIncomes((xs) => xs.filter((x) => x.key !== i.key))}
-                  className="flex size-10 items-center justify-center rounded-[10px] text-muted-ink hover:bg-paper"
-                >
-                  <X className="size-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={() => setIncomes((xs) => [...xs, { key: newKey(), source: "", amount: "", accountId: defaultAccount }])}
-              className="flex min-h-10 items-center gap-1.5 rounded-[10px] px-2.5 text-sm font-semibold text-teal hover:bg-teal-wash"
-            >
-              <Plus aria-hidden className="size-4" /> Add income
-            </button>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <label htmlFor="def-src" className="text-muted-ink">Every new month expects</label>
-              <input
-                id="def-src"
-                aria-label="Default income source"
-                value={defaultIncome.source}
-                onChange={(e) => setDefaultIncome({ ...defaultIncome, source: e.target.value })}
-                className={cn(field, "w-36")}
-              />
-              <input
-                aria-label="Default income amount"
-                inputMode="decimal"
-                placeholder="none"
-                value={defaultIncome.amount}
-                onChange={(e) => setDefaultIncome({ ...defaultIncome, amount: e.target.value })}
-                className={cn(field, "w-32 text-right")}
-              />
-            </div>
-          </div>
-        </fieldset>
       )}
 
       {!missing && (
@@ -517,8 +401,6 @@ export function SetupForm({ data }: { data: Data }) {
               disabled={!dirty || pending}
               onClick={() => {
                 setCats(initial);
-                setIncomes(initialInc);
-                setDefaultIncome(initialDefault);
                 setDefaultAccount(data.defaultAccountId ?? "");
                 setDefaultAlert(String(data.defaultAlertPct));
                 setCurrency(`${data.currencySymbol}|${data.currencyCode}`);

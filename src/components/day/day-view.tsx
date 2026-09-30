@@ -58,7 +58,7 @@ export function DayView({ data }: { data: DayData }) {
       else if (payload.spentOn === data.date) applyOptimistic({ type: "add", row: toRow(payload, `pending-${Date.now()}`) });
       const res = id
         ? await updateExpenseAction({ id, expense: payload })
-        : await createExpenseAction({ ...payload, accountId: payload.accountId ?? "" });
+        : await createExpenseAction(payload);
       if (!res.ok) return void toast.error(res.error);
       const c = res.data.category;
       if (!c) {
@@ -386,7 +386,7 @@ function EntryRow({
   onCover: () => void;
 }) {
   const title = e.itemName ?? e.note ?? e.categoryName ?? "Unlabelled";
-  const subtitle = [e.categoryName, e.itemName && e.note ? e.note : null].filter(Boolean).join(" · ");
+  const subtitle = [e.categoryName, e.itemName && e.note ? e.note : null, e.accountId ? null : "not deducted"].filter(Boolean).join(" · ");
   const state = summary ? stateAfter(summary, 0).state : null;
 
   const body = (

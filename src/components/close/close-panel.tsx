@@ -7,7 +7,7 @@ import { CheckCircle2, Info, Lock } from "lucide-react";
 import { MonthHeader } from "@/components/page-header";
 import { assignCategoryAction, closeMonthAction, moveToCategoryAction } from "@/server/actions";
 import type { getClosePage } from "@/server/queries";
-import { addMonths, formatDay, formatMonth, lastDay } from "@/lib/dates";
+import { formatDay, formatMonth, lastDay } from "@/lib/dates";
 import { formatAmount, formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
@@ -78,16 +78,6 @@ export function ClosePanel({ data }: { data: Data }) {
               Close {formatMonth(blockers.earlierOpen[0])} first
             </Link>
             .
-          </span>
-        </div>
-      )}
-
-      {!closed && data.pendingIncome.length > 0 && (
-        <div className="flex items-center gap-3 rounded-2xl bg-paper px-4 py-3.5 text-ink-soft ring-1 ring-line">
-          <Info aria-hidden className="size-5 shrink-0" />
-          <span className="text-[15px]">
-            Still expected: {data.pendingIncome.map((i) => `${i.source} ${formatAmount(i.amount)}`).join(", ")}. Closing moves{" "}
-            {data.pendingIncome.length === 1 ? "it" : "them"} to {formatMonth(addMonths(data.ym, 1), { month: "long" })}.
           </span>
         </div>
       )}

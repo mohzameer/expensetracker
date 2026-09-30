@@ -243,9 +243,9 @@ export async function getIncomes(db: Db, month: Month | null): Promise<IncomeLin
 }
 
 export type MonthPlan =
-  | { kind: "current"; inAccounts: number; expected: number; leftToSpend: number; freeAfter: number }
-  | { kind: "future"; carriedIn: number; income: number; budgets: number; freeAfter: number }
-  | { kind: "actual"; received: number; spent: number; returned: number };
+  | { kind: "current"; inAccounts: number; leftToSpend: number; freeAfter: number }
+  | { kind: "future"; carriedIn: number; budgets: number; freeAfter: number }
+  | { kind: "actual"; spent: number; returned: number };
 
 /** Unspent budget (never below 0) per category, for open months up to `ym`. */
 async function committedByMonth(db: Db, ym: string) {
@@ -262,25 +262,16 @@ async function committedByMonth(db: Db, ym: string) {
 }
 
 /**
- * Your sheet's view of a month, in cash terms. This month: money in your accounts
- * + income still expected − what's left to spend in budgets = free after the month.
- * A later month: carried in + its income − its budgets. Past months report actuals.
+ * A month in cash terms. This month: money in your accounts − what's still unspent
+ * in budgets = free after the month. A later month: carried in − its budgets.
+ * Past months report actuals. (Expected income is left out for now.)
  */
 export async function getMonthPlan(db: Db, ym: string): Promise<MonthPlan> {
   const cur = currentYearMonth();
-  const incomeRows = await db
-    .select({ yearMonth: months.yearMonth, status: incomes.status, amount: incomes.amount })
-    .from(incomes)
-    .innerJoin(months, eq(months.id, incomes.monthId))
-    .where(lte(months.yearMonth, ym < cur ? ym : ym));
-  const received = incomeRows.filter((r) => r.yearMonth === ym && r.status === "received").reduce((a, r) => a + r.amount, 0);
-
   if (ym < cur) {
-    const month = await getMonth(db, ym);
-    const summaries = await getSummaries(db, month);
+    const summaries = await getSummaries(db, await getMonth(db, ym));
     return {
       kind: "actual",
-      received,
       spent: summaries.reduce((a, x) => a + x.spent, 0),
       returned: summaries.reduce((a, x) => a + x.swept, 0),
     };
@@ -288,10 +279,8 @@ export async function getMonthPlan(db: Db, ym: string): Promise<MonthPlan> {
 
   const inAccounts = await totalBalance(db);
   const leftToSpend = (await committedByMonth(db, cur)).reduce((a, r) => a + Math.max(r.remaining, 0), 0);
-  const expectedUpTo = (m: string) =>
-    incomeRows.filter((r) => r.status === "expected" && r.yearMonth <= m).reduce((a, r) => a + r.amount, 0);
-  const freeAfterCur = inAccounts + expectedUpTo(cur) - leftToSpend;
-  if (ym === cur) return { kind: "current", inAccounts, expected: expectedUpTo(cur), leftToSpend, freeAfter: freeAfterCur };
+  const freeNow = inAccounts - leftToSpend;
+  if (ym === cur) return { kind: "current", inAccounts, leftToSpend, freeAfter: freeNow };
 
   const budgetRows = await db
     .select({ yearMonth: months.yearMonth, total: sql<number>`coalesce(sum(${categoryBudgets.allocation}), 0)::bigint`.mapWith(Number) })
@@ -299,38 +288,34 @@ export async function getMonthPlan(db: Db, ym: string): Promise<MonthPlan> {
     .innerJoin(months, eq(months.id, categoryBudgets.monthId))
     .where(and(gt(months.yearMonth, cur), lte(months.yearMonth, ym)))
     .groupBy(months.yearMonth);
-  const futureBudgets = budgetRows.reduce((a, b) => a + b.total, 0);
   const budgets = budgetRows.find((b) => b.yearMonth === ym)?.total ?? 0;
-  const freeAfter = freeAfterCur + (expectedUpTo(ym) - expectedUpTo(cur)) - futureBudgets;
-  const expected = incomeRows.filter((r) => r.yearMonth === ym && r.status === "expected").reduce((a, r) => a + r.amount, 0);
-  const income = expected + received;
-  // Income received early for this month is already in the accounts, so it isn't carried in twice.
-  return { kind: "future", carriedIn: freeAfter - income + budgets, income, budgets, freeAfter };
+  const freeAfter = freeNow - budgetRows.reduce((a, b) => a + b.total, 0);
+  return { kind: "future", carriedIn: freeAfter + budgets, budgets, freeAfter };
 }
 
 /**
- * Pieces Setup needs to recompute "free after the month" live while caps and
- * income lines are edited: free = base + expected lines − (unspent budgets of the form).
+ * Pieces Setup needs to recompute "free after the month" live while caps are
+ * edited: free = base − (unspent budgets of the categories in the form).
  */
-export async function getSetupPlanBase(db: Db, ym: string, plan: MonthPlan, thisMonthExpected: number, categoryIds: string[]) {
+export async function getSetupPlanBase(db: Db, ym: string, plan: MonthPlan, categoryIds: string[]) {
   const cur = currentYearMonth();
   if (plan.kind === "current") {
     const rows = await committedByMonth(db, cur);
     const inForm = new Set(categoryIds);
     const others = rows.filter((r) => r.yearMonth !== ym || !inForm.has(r.categoryId)).reduce((a, r) => a + Math.max(r.remaining, 0), 0);
     const deltas = Object.fromEntries(rows.filter((r) => r.yearMonth === ym).map((r) => [r.categoryId, r.delta]));
-    return { kind: "current" as const, base: plan.inAccounts + plan.expected - thisMonthExpected - others, deltas };
+    return { kind: "current" as const, base: plan.inAccounts - others, deltas };
   }
   if (plan.kind === "future") {
-    return { kind: "future" as const, base: plan.carriedIn + (plan.income - thisMonthExpected), deltas: {} as Record<string, number> };
+    return { kind: "future" as const, base: plan.carriedIn, deltas: {} as Record<string, number> };
   }
   return null;
 }
 
 export async function getDashboard(db: Db, ym: string) {
   const month = await getMonth(db, ym);
-  const [income, plan, settings, summaries, monthly, daily] = await Promise.all([
-    getIncomes(db, month),
+  const [accountList, plan, settings, summaries, monthly, daily] = await Promise.all([
+    getAccounts(db),
     getMonthPlan(db, ym),
     getSettings(db),
     getSummaries(db, month),
@@ -375,7 +360,7 @@ export async function getDashboard(db: Db, ym: string) {
       uncategorized,
     },
     owed,
-    income,
+    accounts: accountList,
     plan,
     weeks: weeks.map((w) => ({ label: w.label, total: w.total, days: w.to - w.from + 1 })),
     evenPacePerDay: days ? allocated / days : 0,
@@ -385,17 +370,11 @@ export async function getDashboard(db: Db, ym: string) {
 /** Accounts page: balances, free money, and every movement in or out of an account. */
 export async function getMoneyPage(db: Db) {
   const cur = currentYearMonth();
-  const [settings, accountList, free, committed, expected, entries, incomeIn, spendDays, catalog] = await Promise.all([
+  const [settings, accountList, free, committed, entries, incomeIn, spendDays, catalog] = await Promise.all([
     getSettings(db),
     getAccounts(db),
     getSavingsBalance(db, cur),
     committedByMonth(db, cur),
-    db
-      .select({ source: incomes.source, amount: incomes.amount, yearMonth: months.yearMonth })
-      .from(incomes)
-      .innerJoin(months, eq(months.id, incomes.monthId))
-      .where(and(eq(incomes.status, "expected"), lte(months.yearMonth, addMonths(cur, 1))))
-      .orderBy(asc(months.yearMonth)),
     db
       .select({ id: accountEntries.id, accountId: accountEntries.accountId, date: accountEntries.occurredOn, amount: accountEntries.amount, kind: accountEntries.kind, note: accountEntries.note })
       .from(accountEntries)
@@ -435,7 +414,6 @@ export async function getMoneyPage(db: Db) {
     defaultAccountId: settings.defaultAccountId,
     free,
     leftToSpend: committed.reduce((a, r) => a + Math.max(r.remaining, 0), 0),
-    expected,
     ledger,
     categories: catalog.categories,
   };
@@ -470,8 +448,7 @@ export async function getSpending(db: Db) {
 export async function getClosePage(db: Db, ym: string) {
   const month = await getMonth(db, ym);
   const t = today();
-  const [income, settings, summaries, monthly, blockers, uncategorized, savings, catalog] = await Promise.all([
-    getIncomes(db, month),
+  const [settings, summaries, monthly, blockers, uncategorized, savings, catalog] = await Promise.all([
     getSettings(db),
     getSummaries(db, month),
     getMonthlyItems(db, month),
@@ -497,7 +474,6 @@ export async function getClosePage(db: Db, ym: string) {
     blockers,
     uncategorized: uncategorized as ExpenseRow[],
     savings,
-    pendingIncome: income.filter((i) => i.status === "expected"),
     categories: catalog.categories,
   };
 }
@@ -519,8 +495,7 @@ export async function getSetupPage(db: Db, ym: string) {
   const month = ym >= cur ? await ensureMonth(db, ym) : await getMonth(db, ym);
   const prevYm = addMonths(ym, -1);
   const prev = await getMonth(db, prevYm);
-  const [income, plan, settings, catalog, budgets, prevBudgets, accountList] = await Promise.all([
-    getIncomes(db, month),
+  const [plan, settings, catalog, budgets, prevBudgets, accountList] = await Promise.all([
     getMonthPlan(db, ym),
     getSettings(db),
     getCatalog(db, month),
@@ -529,13 +504,7 @@ export async function getSetupPage(db: Db, ym: string) {
     getAccounts(db),
   ]);
   const byCat = new Map(budgets.map((b) => [b.categoryId, b]));
-  const planBase = await getSetupPlanBase(
-    db,
-    ym,
-    plan,
-    income.filter((i) => i.status === "expected").reduce((a, i) => a + i.amount, 0),
-    catalog.categories.map((c) => c.id),
-  );
+  const planBase = await getSetupPlanBase(db, ym, plan, catalog.categories.map((c) => c.id));
   return {
     ym,
     prevYm,
@@ -543,12 +512,10 @@ export async function getSetupPage(db: Db, ym: string) {
     currencySymbol: settings.currencySymbol,
     currencyCode: settings.currencyCode,
     defaultAlertPct: month?.defaultAlertPct ?? settings.defaultAlertPct,
-    incomes: income,
     plan,
     planBase,
     accounts: accountList,
     defaultAccountId: settings.defaultAccountId,
-    defaultIncome: { source: settings.defaultIncomeSource, amount: settings.defaultIncomeAmount },
     prevAllocations: Object.fromEntries(prevBudgets.map((b) => [b.categoryId, b.allocation])) as Record<string, number>,
     categories: catalog.categories.map((c) => ({
       id: c.id,

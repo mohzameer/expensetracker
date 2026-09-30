@@ -21,8 +21,8 @@ export const expenseInput = z.object({
   accountId: id.nullable(), // null only when editing an expense from before accounts existed
 });
 
-/** New expenses must say which account paid. */
-export const newExpenseInput = expenseInput.extend({ accountId: z.uuid("Choose which account paid") });
+/** New expenses say which account paid, or null for "don't deduct" (already out of the balance). */
+export const newExpenseInput = expenseInput;
 
 export const newAccountInput = z.object({ name, opening: z.number().int().min(-1e13).max(1e13) });
 export const setBalanceInput = z.object({ accountId: id, actual: z.number().int().min(-1e13).max(1e13), note: z.string().trim().max(200).nullable() });

@@ -64,8 +64,11 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
   const [note, setNote] = useState(original?.note ?? "");
   // New expenses default to the chosen default account (ComBank); edits keep what was saved.
   const [accountId, setAccountId] = useState<string | null>(
-    original ? original.accountId : (data.defaultAccountId ?? data.accounts[0]?.id ?? null),
+    original?.accountId ?? data.defaultAccountId ?? data.accounts[0]?.id ?? null,
   );
+  // "Don't deduct": the money already left your account before you set its balance
+  // (e.g. rent paid before you entered today's balance). Counts for budgets only.
+  const [noDeduct, setNoDeduct] = useState(!!original && original.accountId === null);
   const [newCategory, setNewCategory] = useState<{ name: string; allocation: string; alertPct: string } | null>(null);
   const [newItem, setNewItem] = useState<{ name: string; kind: "one_off" | "monthly"; amount: string } | null>(null);
   const [extraCats, setExtraCats] = useState<CatalogCategory[]>([]);
@@ -168,9 +171,16 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!amount) return void toast.error("Enter an amount above zero.");
-    if (!original && !accountId) return void toast.error("Choose which account paid.");
+    if (!noDeduct && !accountId) return void toast.error("Choose which account paid.");
     onSubmit(
-      { spentOn: date, categoryId, itemId: categoryId ? itemId : null, amount, note: note.trim() || null, accountId },
+      {
+        spentOn: date,
+        categoryId,
+        itemId: categoryId ? itemId : null,
+        amount,
+        note: note.trim() || null,
+        accountId: noDeduct ? null : accountId,
+      },
       original?.id,
     );
   };
@@ -354,9 +364,10 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
         {data.accounts.length > 0 && (
           <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0">
             <legend className={cn(fieldLabel, "pb-1.5")}>Paid from</legend>
-            <div className="flex flex-wrap gap-2">
+            <div className={cn("flex flex-wrap gap-2", noDeduct && "pointer-events-none opacity-40")} aria-disabled={noDeduct}>
               {data.accounts.map((a) => {
-                const after = a.balance - (accountId === a.id ? (amount ?? 0) - (original?.accountId === a.id ? original.amount : 0) : 0);
+                const deducting = !noDeduct && accountId === a.id;
+                const after = a.balance - (deducting ? (amount ?? 0) - (original?.accountId === a.id ? original.amount : 0) : 0);
                 return (
                   <label
                     key={a.id}
@@ -374,28 +385,26 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
                     />
                     <span className="flex flex-col">
                       <span className="text-[15px] font-medium">{a.name}</span>
-                      <span className={cn("text-xs", after < 0 ? "font-semibold text-bad" : "text-muted-ink")}>
-                        {accountId === a.id && amount ? `${formatAmount(after)} after` : formatAmount(a.balance)}
+                      <span className={cn("text-xs", deducting && after < 0 ? "font-semibold text-bad" : "text-muted-ink")}>
+                        {deducting && amount ? `${formatAmount(after)} after` : formatAmount(a.balance)}
                       </span>
                     </span>
                   </label>
                 );
               })}
-              {original && original.accountId === null && (
-                <label
-                  className={cn(
-                    "flex min-h-12 flex-1 cursor-pointer items-center gap-2.5 rounded-xl border px-3.5",
-                    accountId === null ? "border-[1.5px] border-teal bg-teal-wash" : "border-line-strong",
-                  )}
-                >
-                  <input type="radio" name="account" checked={accountId === null} onChange={() => setAccountId(null)} className="size-[18px] accent-teal" />
-                  <span className="flex flex-col">
-                    <span className="text-[15px] font-medium">Not tracked</span>
-                    <span className="text-xs text-muted-ink">logged before accounts</span>
-                  </span>
-                </label>
-              )}
             </div>
+            <label className="flex min-h-11 cursor-pointer items-start gap-2.5 pt-1">
+              <input
+                type="checkbox"
+                checked={noDeduct}
+                onChange={(e) => setNoDeduct(e.target.checked)}
+                className="mt-0.5 size-[18px] shrink-0 accent-teal"
+              />
+              <span className="flex flex-col">
+                <span className="text-sm font-medium">Don&apos;t deduct from an account</span>
+                <span className="text-xs text-muted-ink">Already out of your balance (paid before you set it). Still counts for the budget.</span>
+              </span>
+            </label>
           </fieldset>
         )}
 

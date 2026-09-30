@@ -52,11 +52,6 @@ export function AccountsView({ data }: { data: Data }) {
             {formatMoney(total, data.currency)} in accounts − {formatMoney(data.leftToSpend, data.currency)} left to spend in{" "}
             {formatMonth(data.ym, { month: "long" })}&apos;s budgets
           </span>
-          {data.expected.length > 0 && (
-            <span className="text-right text-[13px] text-muted-ink">
-              Expected: {data.expected.map((e) => `${e.source} ${formatAmount(e.amount)}`).join(" · ")}
-            </span>
-          )}
         </div>
       </div>
 

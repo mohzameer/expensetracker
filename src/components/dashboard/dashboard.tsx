@@ -3,7 +3,7 @@ import { Download, Plus } from "lucide-react";
 import { MonthHeader } from "@/components/page-header";
 import { ColumnChart } from "@/components/charts/column-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
-import { PlanBand } from "@/components/income/plan-band";
+import { MoneyBand } from "@/components/income/money-band";
 import type { getDashboard } from "@/server/queries";
 import { formatMonth } from "@/lib/dates";
 import { formatAmount, formatMoney } from "@/lib/money";
@@ -58,7 +58,7 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
         </div>
       ) : (
         <>
-          <PlanBand ym={data.ym} plan={data.plan} income={data.income} currency={currency} readOnly={closed} />
+          <MoneyBand ym={data.ym} plan={data.plan} accounts={data.accounts} currency={currency} />
 
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Tile label="Allocated" value={formatMoney(totals.allocated, currency)} sub={`${data.summaries.length} categories`} />
