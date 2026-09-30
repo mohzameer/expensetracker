@@ -229,18 +229,49 @@ export function DayView({ data }: { data: DayData }) {
             </div>
           ) : (
             <ul className={cn("card flex flex-col divide-y divide-line-soft", closed && "opacity-85")}>
-              {expenses.map((e) => (
-                <EntryRow
-                  key={e.id}
-                  expense={e}
-                  summary={summaryOf(e.categoryId)}
-                  currency={data.currency}
-                  readOnly={closed}
-                  pending={e.id.startsWith("pending-")}
-                  onEdit={() => openSheet({ kind: "edit", expense: e })}
-                  onCover={() => e.categoryId && openCover(e.categoryId)}
-                />
-              ))}
+              {groupByCategory(expenses).map((group) => {
+                const summary = summaryOf(group[0].categoryId);
+                const cover = () => group[0].categoryId && openCover(group[0].categoryId);
+                // One entry: as before. Several in one category: the items stay prominent and
+                // the category's balance is shown once, quietly, under them.
+                return group.length === 1 || !group[0].categoryId ? (
+                  group.map((e) => (
+                    <EntryRow
+                      key={e.id}
+                      expense={e}
+                      summary={summary}
+                      currency={data.currency}
+                      readOnly={closed}
+                      pending={e.id.startsWith("pending-")}
+                      onEdit={() => openSheet({ kind: "edit", expense: e })}
+                      onCover={cover}
+                    />
+                  ))
+                ) : (
+                  <li key={group[0].categoryId} className="flex flex-col">
+                    <ul className="flex flex-col">
+                      {group.map((e) => (
+                        <EntryRow
+                          key={e.id}
+                          expense={e}
+                          currency={data.currency}
+                          readOnly={closed}
+                          pending={e.id.startsWith("pending-")}
+                          hideCategory
+                          onEdit={() => openSheet({ kind: "edit", expense: e })}
+                          onCover={cover}
+                        />
+                      ))}
+                    </ul>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3.5 pt-0.5 pb-3">
+                      <span className="text-xs text-muted-ink">
+                        {group[0].categoryName} · {group.length} entries · {formatAmount(group.reduce((a, e) => a + e.amount, 0))}
+                      </span>
+                      {!closed && summary && <CategoryStatus summary={summary} currency={data.currency} onCover={cover} />}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
@@ -380,25 +411,29 @@ function EntryRow({
   pending,
   onEdit,
   onCover,
+  hideCategory = false,
 }: {
   expense: ExpenseRow;
+  /** The category's balance line; omitted when a group shows it once. */
   summary?: CategorySummary;
   currency: string;
   readOnly: boolean;
   pending: boolean;
   onEdit: () => void;
   onCover: () => void;
+  hideCategory?: boolean;
 }) {
   const title = e.itemName ?? e.note ?? e.categoryName ?? "Unlabelled";
-  const subtitle = [e.categoryName, e.itemName && e.note ? e.note : null, e.accountId ? null : "not deducted"].filter(Boolean).join(" · ");
-  const state = summary ? stateAfter(summary, 0).state : null;
+  const subtitle = [hideCategory ? null : e.categoryName, e.itemName && e.note ? e.note : null, e.accountId ? null : "not deducted"]
+    .filter(Boolean)
+    .join(" · ");
 
   const body = (
     <>
       <div className="flex min-w-0 flex-1 flex-col gap-[3px] text-left">
         <span className="truncate text-[15px] font-medium">{title}</span>
         {e.categoryId ? (
-          <span className="truncate text-xs text-muted-ink">{subtitle}</span>
+          subtitle && <span className="truncate text-xs text-muted-ink">{subtitle}</span>
         ) : (
           <span className="text-xs font-semibold text-warn">Needs category</span>
         )}
@@ -416,29 +451,61 @@ function EntryRow({
           {body}
         </button>
       )}
-      {!readOnly && summary && state && (
+      {!readOnly && summary && (
         <div className="-mt-1.5 flex items-center gap-2 px-3.5 pb-3">
-          {state === "red" ? (
-            <>
-              <span className="text-xs font-semibold text-bad">
-                {summary.name} at {formatMoney(summary.remaining, currency)}
-              </span>
-              <button onClick={onCover} className="flex min-h-7 items-center rounded-full bg-bad-bg px-2.5 text-xs font-semibold text-bad">
-                Cover
-              </button>
-            </>
-          ) : state === "amber" ? (
-            <span className="text-xs font-semibold text-warn">
-              {summary.remaining === 0 ? `${summary.name} fully used` : `Only ${formatMoney(summary.remaining, currency)} left`}
-            </span>
-          ) : (
-            <span className="flex items-center gap-1 text-xs font-semibold text-ok">
-              <Check aria-hidden className="size-3" strokeWidth={3} />
-              {formatMoney(summary.remaining, currency)} left
-            </span>
-          )}
+          <CategoryStatus summary={summary} currency={currency} onCover={onCover} />
         </div>
       )}
     </li>
   );
+}
+
+/** "Rs X left" (green), "Only Rs X left" / "fully used" (amber), or "at −Rs X" with Cover (red). */
+function CategoryStatus({ summary, currency, onCover }: { summary: CategorySummary; currency: string; onCover: () => void }) {
+  const state = stateAfter(summary, 0).state;
+  if (state === "red") {
+    return (
+      <span className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-bad">
+          {summary.name} at {formatMoney(summary.remaining, currency)}
+        </span>
+        <button onClick={onCover} className="flex min-h-7 items-center rounded-full bg-bad-bg px-2.5 text-xs font-semibold text-bad">
+          Cover
+        </button>
+      </span>
+    );
+  }
+  if (state === "amber") {
+    return (
+      <span className="text-xs font-semibold text-warn">
+        {summary.remaining === 0 ? `${summary.name} fully used` : `Only ${formatMoney(summary.remaining, currency)} left`}
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1 text-xs font-semibold text-ok">
+      <Check aria-hidden className="size-3" strokeWidth={3} />
+      {formatMoney(summary.remaining, currency)} left
+    </span>
+  );
+}
+
+/** Entries grouped by category, in the order each category first appears (uncategorised stay single). */
+function groupByCategory(list: ExpenseRow[]): ExpenseRow[][] {
+  const groups: ExpenseRow[][] = [];
+  const byCat = new Map<string, ExpenseRow[]>();
+  for (const e of list) {
+    if (!e.categoryId) {
+      groups.push([e]);
+      continue;
+    }
+    const g = byCat.get(e.categoryId);
+    if (g) g.push(e);
+    else {
+      const fresh = [e];
+      byCat.set(e.categoryId, fresh);
+      groups.push(fresh);
+    }
+  }
+  return groups;
 }
