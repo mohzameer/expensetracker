@@ -118,7 +118,7 @@ export async function removeCategory(db: Db, id: string) {
     DELETE FROM category_budgets b USING months m
     WHERE b.month_id = m.id AND m.status = 'open' AND b.category_id = ${id}
       AND NOT EXISTS (SELECT 1 FROM expenses e WHERE e.category_id = ${id}
-        AND e.spent_on >= m.starts_on AND e.spent_on < m.starts_on + interval '1 month')
+        AND e.spent_on >= m.starts_on AND e.spent_on < m.ends_on)
       AND NOT EXISTS (SELECT 1 FROM transfers t WHERE t.month_id = m.id
         AND (t.from_category_id = ${id} OR t.to_category_id = ${id}))`);
 }
@@ -154,6 +154,8 @@ export type SetupPayload = {
   defaultIncome?: { source: string; amount: number | null };
   /** "Paid from" default for new expenses and the account new months' income goes into. */
   defaultAccountId?: string | null;
+  /** Day budget months start on (1–28). Only months created afterwards use it. */
+  periodStartDay?: number;
 };
 
 /** Setup's single "Save all": everything in one transaction. */
@@ -170,6 +172,9 @@ export async function saveSetup(db: Db, p: SetupPayload) {
         .update(settings)
         .set({ defaultIncomeSource: p.defaultIncome.source.trim() || "Salary", defaultIncomeAmount: p.defaultIncome.amount })
         .where(eq(settings.id, 1));
+    }
+    if (p.periodStartDay !== undefined) {
+      await tx.update(settings).set({ periodStartDay: p.periodStartDay }).where(eq(settings.id, 1));
     }
     if (p.defaultAccountId !== undefined) {
       await tx.update(settings).set({ defaultAccountId: p.defaultAccountId }).where(eq(settings.id, 1));

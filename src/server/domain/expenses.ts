@@ -1,10 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { categoryMonthSummary, expenses, items } from "@/db/schema";
-import { monthOf } from "@/lib/dates";
 import { UserError } from "@/lib/errors";
 import { stateAfter } from "@/lib/budget";
-import { assertOpen, ensureMonth, getMonth } from "./months";
+import { assertOpen, ensureMonth, getMonth, monthOfDate } from "./months";
 
 export type ExpenseInput = {
   spentOn: string;
@@ -37,7 +36,7 @@ export async function categoryState(db: Db, categoryId: string | null, ym: strin
 }
 
 export async function createExpense(db: Db, input: ExpenseInput) {
-  const ym = monthOf(input.spentOn);
+  const ym = await monthOfDate(db, input.spentOn);
   assertOpen(await ensureMonth(db, ym));
   await checkItem(db, input);
   const [row] = await db.insert(expenses).values(input).returning();
@@ -47,8 +46,8 @@ export async function createExpense(db: Db, input: ExpenseInput) {
 export async function updateExpense(db: Db, id: string, input: ExpenseInput) {
   const [old] = await db.select().from(expenses).where(eq(expenses.id, id));
   if (!old) throw new UserError("That expense no longer exists.");
-  assertOpen(await getMonth(db, monthOf(old.spentOn)));
-  const ym = monthOf(input.spentOn);
+  assertOpen(await getMonth(db, await monthOfDate(db, old.spentOn)));
+  const ym = await monthOfDate(db, input.spentOn);
   assertOpen(await ensureMonth(db, ym));
   await checkItem(db, input);
   const [row] = await db.update(expenses).set({ ...input, updatedAt: new Date() }).where(eq(expenses.id, id)).returning();
@@ -58,7 +57,7 @@ export async function updateExpense(db: Db, id: string, input: ExpenseInput) {
 export async function deleteExpense(db: Db, id: string) {
   const [old] = await db.select().from(expenses).where(eq(expenses.id, id));
   if (!old) return;
-  assertOpen(await getMonth(db, monthOf(old.spentOn)));
+  assertOpen(await getMonth(db, await monthOfDate(db, old.spentOn)));
   await db.delete(expenses).where(eq(expenses.id, id));
 }
 
@@ -66,7 +65,7 @@ export async function deleteExpense(db: Db, id: string) {
 export async function assignCategory(db: Db, id: string, categoryId: string) {
   const [old] = await db.select().from(expenses).where(eq(expenses.id, id));
   if (!old) throw new UserError("That expense no longer exists.");
-  const ym = monthOf(old.spentOn);
+  const ym = await monthOfDate(db, old.spentOn);
   assertOpen(await ensureMonth(db, ym));
   await db.update(expenses).set({ categoryId, itemId: null, updatedAt: new Date() }).where(eq(expenses.id, id));
   return categoryState(db, categoryId, ym);

@@ -36,8 +36,14 @@ export const settings = pgTable(
     defaultIncomeAmount: money(),
     // Pre-selected "Paid from" account for new expenses, and where new months' default income goes.
     defaultAccountId: uuid().references((): AnyPgColumn => accounts.id),
+    // Day a budget month starts (e.g. 25 = salary day: "September" runs 25 Sep → 24 Oct). 1 = calendar months.
+    periodStartDay: smallint().notNull().default(1),
   },
-  () => [check("settings_singleton", sql`id = 1`), check("settings_default_income", sql`default_income_amount is null or default_income_amount > 0`)],
+  () => [
+    check("settings_singleton", sql`id = 1`),
+    check("settings_default_income", sql`default_income_amount is null or default_income_amount > 0`),
+    check("settings_period_start_day", sql`period_start_day between 1 and 28`),
+  ],
 );
 
 /** Real money: bank accounts and cash. Balances are derived (see account_balances). */
@@ -80,17 +86,16 @@ export const months = pgTable(
   {
     id: uuid().primaryKey().defaultRandom(),
     yearMonth: char({ length: 7 }).notNull().unique(),
-    startsOn: date({ mode: "string" })
-      .notNull()
-      .generatedAlwaysAs(
-        sql`make_date(left(year_month, 4)::int, right(year_month, 2)::int, 1)`,
-      ),
+    // A month is a date range [startsOn, endsOn), named after the month it starts in.
+    startsOn: date({ mode: "string" }).notNull(),
+    endsOn: date({ mode: "string" }).notNull(),
     status: text({ enum: ["open", "closed"] }).notNull().default("open"),
     closedAt: timestamp({ withTimezone: true }),
     defaultAlertPct: smallint().notNull().default(10),
   },
   (t) => [
     uniqueIndex("months_starts_on_idx").on(t.startsOn),
+    check("months_range", sql`ends_on > starts_on`),
     check("months_year_month_format", sql`year_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
     check("months_status", sql`status in ('open', 'closed')`),
     check("months_alert_pct", sql`default_alert_pct between 0 and 100`),

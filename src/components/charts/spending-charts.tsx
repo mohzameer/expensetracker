@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { ColumnChart } from "./column-chart";
 import type { getSpending } from "@/server/queries";
-import { addDays, addMonths, formatDay, formatMonth, monthOf } from "@/lib/dates";
+import { addDays, addMonths, formatDay, formatMonth, formatRange, periodEnd, periodOf, periodStart } from "@/lib/dates";
 import { formatAmount, formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
@@ -27,7 +27,7 @@ function weekStart(date: string) {
 
 const short = (d: string) => formatDay(d, { day: "numeric", month: "short" });
 
-function buckets(period: Period, today: string): Bucket[] {
+function buckets(period: Period, today: string, startDay: number): Bucket[] {
   if (period === "daily") {
     return Array.from({ length: 30 }, (_, i) => {
       const d = addDays(today, i - 29);
@@ -42,11 +42,20 @@ function buckets(period: Period, today: string): Bucket[] {
       return { key: from, label: short(from), detail: `${short(from)} – ${short(to)}`, from, to };
     });
   }
-  const cur = monthOf(today);
+  // Budget months (e.g. "September" = 25 Sep → 24 Oct when months start on the 25th).
+  const cur = periodOf(today, startDay);
   return Array.from({ length: 12 }, (_, i) => {
     const ym = addMonths(cur, i - 11);
-    // Three letters ("Sep", not "Sept") so twelve labels fit on a phone.
-    return { key: ym, label: formatMonth(ym, { month: "short" }).slice(0, 3), detail: formatMonth(ym), from: `${ym}-01`, to: `${ym}-31` };
+    const from = periodStart(ym, startDay);
+    const end = periodEnd(ym, startDay);
+    return {
+      key: ym,
+      // Three letters ("Sep", not "Sept") so twelve labels fit on a phone.
+      label: formatMonth(ym, { month: "short" }).slice(0, 3),
+      detail: startDay === 1 ? formatMonth(ym) : `${formatMonth(ym)} · ${formatRange(from, end)}`,
+      from,
+      to: addDays(end, -1),
+    };
   });
 }
 
@@ -56,7 +65,7 @@ export function SpendingCharts({ data, back }: { data: Data; back: string }) {
   const [selected, setSelected] = useState<number | null>(null);
 
   const series = useMemo(() => {
-    return buckets(period, data.today).map((b) => {
+    return buckets(period, data.today, data.startDay).map((b) => {
       const rows = data.rows.filter((r) => r.date >= b.from && r.date <= b.to);
       const byCat = new Map<string, { name: string; color: string; total: number }>();
       for (const r of rows) {

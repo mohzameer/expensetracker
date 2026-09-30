@@ -4,7 +4,7 @@ import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { assignCategoryAction } from "@/server/actions";
 import type { getInbox } from "@/server/queries";
-import { formatDay, monthOf } from "@/lib/dates";
+import { formatDay } from "@/lib/dates";
 import { formatAmount, formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
@@ -46,7 +46,7 @@ function InboxCard({
   onAssign: (id: string, categoryId: string, name: string) => void;
 }) {
   const [showAll, setShowAll] = useState(false);
-  const summaries = data.summariesByMonth[monthOf(row.spentOn)] ?? [];
+  const summaries = data.summariesByMonth[data.monthByRow[row.id]] ?? [];
   const remaining = (id: string) => summaries.find((s) => s.categoryId === id)?.remaining;
   // Most-used categories first; "Other…" reveals the rest.
   const ranked = [...data.catalog.categories].sort(

@@ -68,6 +68,7 @@ export function SetupForm({ data }: { data: Data }) {
   const [defaultAlert, setDefaultAlert] = useState(String(data.defaultAlertPct));
   const [currency, setCurrency] = useState(`${data.currencySymbol}|${data.currencyCode}`);
   const [defaultAccount, setDefaultAccount] = useState(data.defaultAccountId ?? "");
+  const [startDay, setStartDay] = useState(String(data.periodStartDay));
   const [pending, start] = useTransition();
 
   const closed = data.month?.status === "closed";
@@ -83,7 +84,8 @@ export function SetupForm({ data }: { data: Data }) {
     JSON.stringify(cats) !== JSON.stringify(initial) ||
     defaultAlert !== String(data.defaultAlertPct) ||
     currency !== `${data.currencySymbol}|${data.currencyCode}` ||
-    defaultAccount !== (data.defaultAccountId ?? "");
+    defaultAccount !== (data.defaultAccountId ?? "") ||
+    startDay !== String(data.periodStartDay);
 
   const updateCat = (key: string, patch: Partial<CatState>) => setCats((cs) => cs.map((c) => (c.key === key ? { ...c, ...patch } : c)));
   const updateItem = (catKey: string, itemKey: string, patch: Partial<ItemState>) =>
@@ -144,6 +146,7 @@ export function SetupForm({ data }: { data: Data }) {
         currencySymbol: symbol,
         currencyCode: code,
         defaultAccountId: defaultAccount || null,
+        periodStartDay: Math.min(Math.max(Number(startDay) || 1, 1), 28),
         categories: cats
           .filter((c) => c.id || !c.removed)
           .map((c) => ({
@@ -175,7 +178,7 @@ export function SetupForm({ data }: { data: Data }) {
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 pt-6 lg:px-9 lg:pt-7">
       <div className="flex flex-wrap items-end justify-between gap-6">
         <div className="flex flex-col gap-1.5">
-          <MonthHeader ym={data.ym} href={(ym) => `/setup?month=${ym}`} title={`Setup · ${formatMonth(data.ym)}`} />
+          <MonthHeader ym={data.ym} range={data.range} href={(ym) => `/setup?month=${ym}`} title={`Setup · ${formatMonth(data.ym)}`} />
           <span className="text-sm text-muted-ink">
             Everything on one page. Categories and monthly items carry into every month; one-off items are for {monthName} only.
             Caps and alert % apply to {monthName}.
@@ -202,6 +205,21 @@ export function SetupForm({ data }: { data: Data }) {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="startday" className={label} title="Applies to months not created yet">
+              Month starts on day
+            </label>
+            <input
+              id="startday"
+              inputMode="numeric"
+              disabled={readOnly}
+              value={startDay}
+              onChange={(e) => setStartDay(e.target.value.replace(/\D/g, "").slice(0, 2))}
+              aria-describedby="startday-hint"
+              className={cn(field, "w-[100px]")}
+            />
+            <span id="startday-hint" className="sr-only">Applies to months not created yet</span>
           </div>
           {data.accounts.length > 0 && (
             <div className="flex flex-col gap-1">
@@ -402,6 +420,7 @@ export function SetupForm({ data }: { data: Data }) {
               onClick={() => {
                 setCats(initial);
                 setDefaultAccount(data.defaultAccountId ?? "");
+                setStartDay(String(data.periodStartDay));
                 setDefaultAlert(String(data.defaultAlertPct));
                 setCurrency(`${data.currencySymbol}|${data.currencyCode}`);
               }}

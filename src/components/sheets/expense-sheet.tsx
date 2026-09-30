@@ -10,11 +10,14 @@ import { createCategoryAction, createItemAction } from "@/server/actions";
 import type { CatalogCategory, CatalogItem, CategorySummary, DueItem, ExpenseRow } from "@/server/queries";
 import { stateAfter } from "@/lib/budget";
 import { formatAmount, formatMoney, parseMoney, toInputValue } from "@/lib/money";
-import { formatDay, formatMonth, monthOf } from "@/lib/dates";
+import { formatDay, formatMonth, periodOf, type Range } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 
 export type EntryData = {
   ym: string;
+  /** Dates of the budget month shown (e.g. 25 Sep → 25 Oct) and the day months start on. */
+  range: Range;
+  startDay: number;
   currency: string;
   defaultAlertPct: number;
   summaries: CategorySummary[];
@@ -76,8 +79,9 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
   const [creating, startCreating] = useTransition();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const entryYm = monthOf(date);
-  const sameMonth = entryYm === data.ym;
+  const inRange = (d: string) => d >= data.range.from && d < data.range.to;
+  const entryYm = inRange(date) ? data.ym : periodOf(date, data.startDay);
+  const sameMonth = inRange(date);
 
   const categories = useMemo(() => {
     const ids = new Set(data.catalog.categories.map((c) => c.id));
@@ -114,7 +118,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
     const s = summaryFor(categoryId);
     const effectiveAllocation = s?.effectiveAllocation ?? 0;
     let remaining = s?.remaining ?? 0;
-    if (original && original.categoryId === categoryId && monthOf(original.spentOn) === data.ym) remaining += original.amount;
+    if (original && original.categoryId === categoryId && inRange(original.spentOn)) remaining += original.amount;
     const alertPct = s?.alertPct ?? data.defaultAlertPct;
     return { effectiveAllocation, remaining, alertPct, ...stateAfter({ effectiveAllocation, remaining, alertPct }, amount ?? 0) };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1,10 +1,22 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { addMonths, formatMonth } from "@/lib/dates";
+import { addMonths, formatMonth, formatRange, type Range } from "@/lib/dates";
 
-/** Month switcher used by the desktop pages: ‹ September 2026 ›. */
-export function MonthHeader({ ym, href, title, children }: { ym: string; href: (ym: string) => string; title?: string; children?: ReactNode }) {
+/** Month switcher used by the desktop pages: ‹ September 2026 › with its dates (25 Sep – 24 Oct). */
+export function MonthHeader({
+  ym,
+  href,
+  title,
+  range,
+  children,
+}: {
+  ym: string;
+  href: (ym: string) => string;
+  title?: string;
+  range?: Range;
+  children?: ReactNode;
+}) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-2.5">
@@ -15,7 +27,10 @@ export function MonthHeader({ ym, href, title, children }: { ym: string; href: (
         >
           <ChevronLeft className="size-[18px]" />
         </Link>
-        <h1 className="font-display text-[26px] font-semibold lg:text-3xl">{title ?? formatMonth(ym)}</h1>
+        <div className="flex flex-col">
+          <h1 className="font-display text-[26px] leading-tight font-semibold lg:text-3xl">{title ?? formatMonth(ym)}</h1>
+          {range && <span className="text-[13px] text-muted-ink">{formatRange(range.from, range.to)}</span>}
+        </div>
         <Link
           href={href(addMonths(ym, 1))}
           aria-label="Next month"

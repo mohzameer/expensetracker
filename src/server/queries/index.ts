@@ -3,9 +3,9 @@ import { and, asc, desc, eq, gt, gte, isNotNull, isNull, lt, lte, sql, sum } fro
 import type { Db } from "@/db";
 import { accountEntries, accounts, categories, categoryBudgets, categoryMonthSummary, expenses, incomes, items, monthlyItemStatus, months } from "@/db/schema";
 import { getAccounts, totalBalance } from "@/server/domain/accounts";
-import { addMonths, currentYearMonth, daysInMonth, firstDay, monthOf, nextMonthStart, today } from "@/lib/dates";
+import { addDays, addMonths, diffDays, formatDay, formatRange, periodOf, periodStart, today, type Range } from "@/lib/dates";
 import { stateAfter } from "@/lib/budget";
-import { closeBlockers, ensureMonth, getMonth, getSettings, type Month } from "@/server/domain/months";
+import { closeBlockers, currentYm, ensureMonth, getMonth, getSettings, monthOfDate, rangeOf, type Month } from "@/server/domain/months";
 import { itemsForMonth } from "@/server/domain/catalog";
 import { getSavingsBalance } from "@/server/domain/transfers";
 
@@ -51,7 +51,7 @@ const monthInfo = (m: Month | null): MonthInfo =>
 
 /** Create the current month on first visit so allocations roll over by themselves. */
 export async function touchCurrentMonth(db: Db) {
-  await ensureMonth(db, currentYearMonth());
+  await ensureMonth(db, await currentYm(db));
 }
 
 export async function getSummaries(db: Db, month: Month | null): Promise<CategorySummary[]> {
@@ -148,8 +148,9 @@ export type ExpenseRow = {
 };
 
 export async function getDayView(db: Db, date: string) {
-  const ym = monthOf(date);
+  const ym = await monthOfDate(db, date);
   const month = await getMonth(db, ym);
+  const range = await rangeOf(db, ym);
   const [accountList, settings, summaries, catalog, monthly, dayExpenses, count, savings, monthSpend] = await Promise.all([
     getAccounts(db),
     getSettings(db),
@@ -168,7 +169,7 @@ export async function getDayView(db: Db, date: string) {
     db
       .select({ total: sum(expenses.amount).mapWith(Number) })
       .from(expenses)
-      .where(and(gte(expenses.spentOn, firstDay(ym)), lt(expenses.spentOn, nextMonthStart(ym)))),
+      .where(and(gte(expenses.spentOn, range.from), lt(expenses.spentOn, range.to))),
   ]);
 
   const allocated = summaries.reduce((a, s) => a + s.effectiveAllocation, 0);
@@ -177,6 +178,8 @@ export async function getDayView(db: Db, date: string) {
     date,
     today: today(),
     ym,
+    range, // the budget month's dates, e.g. 25 Sep → 25 Oct (exclusive)
+    startDay: settings.periodStartDay,
     month: monthInfo(month),
     currency: settings.currencySymbol,
     defaultAlertPct: month?.defaultAlertPct ?? settings.defaultAlertPct,
@@ -207,11 +210,13 @@ export async function getInbox(db: Db) {
     .leftJoin(items, eq(items.id, expenses.itemId))
     .where(isNull(expenses.categoryId))
     .orderBy(desc(expenses.spentOn), desc(expenses.createdAt))) as ExpenseRow[];
-  const yms = [...new Set(rows.map((r) => monthOf(r.spentOn)))];
+  // Which budget month each expense belongs to, and that month's balances.
+  const monthByRow: Record<string, string> = {};
+  for (const r of rows) monthByRow[r.id] = await monthOfDate(db, r.spentOn);
   const summariesByMonth: Record<string, CategorySummary[]> = {};
-  for (const ym of yms) summariesByMonth[ym] = await getSummaries(db, await getMonth(db, ym));
+  for (const ym of new Set(Object.values(monthByRow))) summariesByMonth[ym] = await getSummaries(db, await getMonth(db, ym));
   const settings = await getSettings(db);
-  return { rows, summariesByMonth, catalog: await getCatalog(db), currency: settings.currencySymbol };
+  return { rows, monthByRow, summariesByMonth, catalog: await getCatalog(db), currency: settings.currencySymbol };
 }
 
 export type IncomeLine = {
@@ -267,7 +272,7 @@ async function committedByMonth(db: Db, ym: string) {
  * Past months report actuals. (Expected income is left out for now.)
  */
 export async function getMonthPlan(db: Db, ym: string): Promise<MonthPlan> {
-  const cur = currentYearMonth();
+  const cur = await currentYm(db);
   if (ym < cur) {
     const summaries = await getSummaries(db, await getMonth(db, ym));
     return {
@@ -298,7 +303,7 @@ export async function getMonthPlan(db: Db, ym: string): Promise<MonthPlan> {
  * edited: free = base − (unspent budgets of the categories in the form).
  */
 export async function getSetupPlanBase(db: Db, ym: string, plan: MonthPlan, categoryIds: string[]) {
-  const cur = currentYearMonth();
+  const cur = await currentYm(db);
   if (plan.kind === "current") {
     const rows = await committedByMonth(db, cur);
     const inForm = new Set(categoryIds);
@@ -314,6 +319,7 @@ export async function getSetupPlanBase(db: Db, ym: string, plan: MonthPlan, cate
 
 export async function getDashboard(db: Db, ym: string) {
   const month = await getMonth(db, ym);
+  const range = await rangeOf(db, ym);
   const [accountList, plan, settings, summaries, monthly, daily] = await Promise.all([
     getAccounts(db),
     getMonthPlan(db, ym),
@@ -323,22 +329,26 @@ export async function getDashboard(db: Db, ym: string) {
     db
       .select({ day: expenses.spentOn, total: sum(expenses.amount).mapWith(Number) })
       .from(expenses)
-      .where(and(gte(expenses.spentOn, firstDay(ym)), lt(expenses.spentOn, nextMonthStart(ym))))
+      .where(and(gte(expenses.spentOn, range.from), lt(expenses.spentOn, range.to)))
       .groupBy(expenses.spentOn),
   ]);
 
-  const days = daysInMonth(ym);
-  const weeks = [0, 1, 2, 3, 4]
-    .map((w) => {
-      const from = w * 7 + 1;
-      const to = Math.min(from + 6, days);
-      return from > days ? null : { label: `${from}–${to}`, from, to, total: 0 };
-    })
-    .filter((w): w is NonNullable<typeof w> => !!w);
+  // 7-day blocks from the month's first day (e.g. 25 Sep, 2 Oct, … 23 Oct).
+  const days = diffDays(range.to, range.from);
+  const weeks: { label: string; detail: string; from: string; to: string; total: number }[] = [];
+  for (let start = range.from; start < range.to; start = addDays(start, 7)) {
+    const end = addDays(start, 7) < range.to ? addDays(start, 7) : range.to; // exclusive
+    weeks.push({
+      label: formatDay(start, { day: "numeric", month: "short" }),
+      detail: formatRange(start, end),
+      from: start,
+      to: end,
+      total: 0,
+    });
+  }
   let uncategorized = 0;
   for (const d of daily) {
-    const n = Number(d.day.slice(8, 10));
-    const w = weeks.find((x) => n >= x.from && n <= x.to);
+    const w = weeks.find((x) => d.day >= x.from && d.day < x.to);
     if (w) w.total += d.total;
   }
   const categorisedSpent = summaries.reduce((a, s) => a + s.spent, 0);
@@ -349,6 +359,7 @@ export async function getDashboard(db: Db, ym: string) {
   const owed = monthly.filter((m) => m.status !== "paid");
   return {
     ym,
+    range,
     month: monthInfo(month),
     currency: settings.currencySymbol,
     summaries: summaries.map((s) => ({ ...s, state: stateAfter(s, 0).state })),
@@ -362,14 +373,14 @@ export async function getDashboard(db: Db, ym: string) {
     owed,
     accounts: accountList,
     plan,
-    weeks: weeks.map((w) => ({ label: w.label, total: w.total, days: w.to - w.from + 1 })),
+    weeks: weeks.map((w) => ({ label: w.label, detail: w.detail, total: w.total, days: diffDays(w.to, w.from) })),
     evenPacePerDay: days ? allocated / days : 0,
   };
 }
 
 /** Accounts page: balances, free money, and every movement in or out of an account. */
 export async function getMoneyPage(db: Db) {
-  const cur = currentYearMonth();
+  const cur = await currentYm(db);
   const [settings, accountList, free, committed, entries, incomeIn, spendDays, catalog] = await Promise.all([
     getSettings(db),
     getAccounts(db),
@@ -388,7 +399,7 @@ export async function getMoneyPage(db: Db) {
     db
       .select({ accountId: expenses.accountId, date: expenses.spentOn, total: sum(expenses.amount).mapWith(Number), n: sql<number>`count(*)::int`.mapWith(Number) })
       .from(expenses)
-      .where(and(isNotNull(expenses.accountId), gte(expenses.spentOn, firstDay(addMonths(cur, -2)))))
+      .where(and(isNotNull(expenses.accountId), gte(expenses.spentOn, (await rangeOf(db, addMonths(cur, -2))).from)))
       .groupBy(expenses.accountId, expenses.spentOn),
     getCatalog(db),
   ]);
@@ -419,12 +430,12 @@ export async function getMoneyPage(db: Db) {
   };
 }
 
-/** Spending by day, week (Mon–Sun) and month, with a category split for each bucket. */
+/** Spending by day, week (Mon–Sun) and budget month, with a category split for each bucket. */
 export async function getSpending(db: Db) {
   const t = today();
-  const from = firstDay(addMonths(monthOf(t), -11));
-  const [settings, rows] = await Promise.all([
-    getSettings(db),
+  const settings = await getSettings(db);
+  const from = periodStart(addMonths(periodOf(t, settings.periodStartDay), -11), settings.periodStartDay);
+  const [rows] = await Promise.all([
     db
       .select({
         date: expenses.spentOn,
@@ -440,6 +451,7 @@ export async function getSpending(db: Db) {
   ]);
   return {
     today: t,
+    startDay: settings.periodStartDay,
     currency: settings.currencySymbol,
     rows: rows.map((r) => ({ ...r, name: r.name ?? "Needs category", color: r.color ?? "var(--faint)" })),
   };
@@ -447,6 +459,7 @@ export async function getSpending(db: Db) {
 
 export async function getClosePage(db: Db, ym: string) {
   const month = await getMonth(db, ym);
+  const range = await rangeOf(db, ym);
   const t = today();
   const [settings, summaries, monthly, blockers, uncategorized, savings, catalog] = await Promise.all([
     getSettings(db),
@@ -458,13 +471,14 @@ export async function getClosePage(db: Db, ym: string) {
       .from(expenses)
       .leftJoin(categories, eq(categories.id, expenses.categoryId))
       .leftJoin(items, eq(items.id, expenses.itemId))
-      .where(and(isNull(expenses.categoryId), gte(expenses.spentOn, firstDay(ym)), lt(expenses.spentOn, nextMonthStart(ym))))
+      .where(and(isNull(expenses.categoryId), gte(expenses.spentOn, range.from), lt(expenses.spentOn, range.to)))
       .orderBy(asc(expenses.spentOn)),
     getSavingsBalance(db),
     getCatalog(db),
   ]);
   return {
     ym,
+    range,
     today: t,
     month: monthInfo(month),
     closedAt: month?.closedAt?.toISOString() ?? null,
@@ -480,7 +494,7 @@ export async function getClosePage(db: Db, ym: string) {
 
 /** Earliest open month that has ended or is the current one: what "Close month" should open. */
 export async function nextMonthToClose(db: Db) {
-  const cur = currentYearMonth();
+  const cur = await currentYm(db);
   const [row] = await db
     .select({ yearMonth: months.yearMonth })
     .from(months)
@@ -491,7 +505,7 @@ export async function nextMonthToClose(db: Db) {
 }
 
 export async function getSetupPage(db: Db, ym: string) {
-  const cur = currentYearMonth();
+  const cur = await currentYm(db);
   const month = ym >= cur ? await ensureMonth(db, ym) : await getMonth(db, ym);
   const prevYm = addMonths(ym, -1);
   const prev = await getMonth(db, prevYm);
@@ -507,6 +521,8 @@ export async function getSetupPage(db: Db, ym: string) {
   const planBase = await getSetupPlanBase(db, ym, plan, catalog.categories.map((c) => c.id));
   return {
     ym,
+    range: await rangeOf(db, ym),
+    periodStartDay: settings.periodStartDay,
     prevYm,
     month: monthInfo(month),
     currencySymbol: settings.currencySymbol,
@@ -531,7 +547,8 @@ export async function getSetupPage(db: Db, ym: string) {
 }
 
 export async function getExportRows(db: Db, ym: string | null) {
-  const where = ym ? and(gte(expenses.spentOn, firstDay(ym)), lt(expenses.spentOn, nextMonthStart(ym))) : undefined;
+  const range: Range | null = ym ? await rangeOf(db, ym) : null;
+  const where = range ? and(gte(expenses.spentOn, range.from), lt(expenses.spentOn, range.to)) : undefined;
   return (await db
     .select(expenseColumns)
     .from(expenses)

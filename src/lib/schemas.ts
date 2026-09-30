@@ -95,5 +95,6 @@ export const setupInput = z.object({
     .array(z.object({ source: z.string().trim().min(1, "Every income line needs a source").max(60), amount, accountId: id.nullable() }))
     .optional(),
   defaultAccountId: id.nullable().optional(),
+  periodStartDay: z.number().int().min(1).max(28).optional(),
   defaultIncome: z.object({ source: z.string().trim().max(60), amount: optionalAmount }).optional(),
 });

@@ -32,7 +32,7 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-[22px] px-4 py-6 lg:px-9 lg:py-7">
-      <MonthHeader ym={data.ym} href={(ym) => `/dashboard?month=${ym}`}>
+      <MonthHeader ym={data.ym} range={data.range} href={(ym) => `/dashboard?month=${ym}`}>
         <div className="flex gap-2">
           <a
             href={`/api/export?month=${data.ym}`}
@@ -128,7 +128,7 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
                   label: w.label,
                   value: w.total,
                   muted: w.days < 7,
-                  detail: w.days < 7 ? `${w.days} days · pace ${formatAmount(Math.round(data.evenPacePerDay * w.days))}` : undefined,
+                  detail: w.days < 7 ? `${w.detail} · ${w.days} days · pace ${formatAmount(Math.round(data.evenPacePerDay * w.days))}` : w.detail,
                 }))}
               />
               )}

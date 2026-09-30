@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { categoryBudgets, categoryMonthSummary, expenses, incomes, monthlyItemStatus, months } from "@/db/schema";
-import { closeBlockers, closeMonth, ensureMonth, getMonth } from "@/server/domain/months";
+import { categoryBudgets, categoryMonthSummary, expenses, incomes, monthlyItemStatus, months, settings } from "@/db/schema";
+import { closeBlockers, closeMonth, ensureMonth, getMonth, monthOfDate } from "@/server/domain/months";
 import { getSavingsBalance, moveToCategory } from "@/server/domain/transfers";
 import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
 import { assignCategory, createExpense, updateExpense } from "@/server/domain/expenses";
@@ -366,5 +366,58 @@ describe("items across months", () => {
     });
     const oct = await ensureMonth(db, "2026-10");
     expect((await itemsForMonth(db, oct.id)).map((i) => i.name)).toContain("Pads");
+  });
+});
+
+describe("pay-cycle months (start on the 25th)", () => {
+  const startOn = (day: number) => db.update(settings).set({ periodStartDay: day }).where(eq(settings.id, 1));
+
+  it("September runs 25 Sep → 24 Oct and October follows on", async () => {
+    await startOn(25);
+    const sep = await ensureMonth(db, "2026-09");
+    const oct = await ensureMonth(db, "2026-10");
+    expect([sep.startsOn, sep.endsOn]).toEqual(["2026-09-25", "2026-10-25"]);
+    expect([oct.startsOn, oct.endsOn]).toEqual(["2026-10-25", "2026-11-25"]);
+    expect(await monthOfDate(db, "2026-09-24")).toBe("2026-08");
+    expect(await monthOfDate(db, "2026-10-10")).toBe("2026-09");
+    expect(await monthOfDate(db, "2026-10-25")).toBe("2026-10");
+  });
+
+  it("counts spending by the cycle, including monthly bills", async () => {
+    await startOn(25);
+    const s = await seedSeptember(db);
+    await s.expense(s.groceries.id, rs(1000), "2026-10-10"); // still September's cycle
+    await s.expense(s.groceries.id, rs(500), "2026-10-26"); // October's
+    await s.expense(s.utilities.id, rs(3990), "2026-10-05", s.internet.id);
+    expect((await summary("2026-09", s.groceries.id)).spent).toBe(rs(1000));
+    expect((await summary("2026-10", s.groceries.id)).spent).toBe(rs(500));
+    const m = (await getMonth(db, "2026-09"))!;
+    const [internet] = await db
+      .select()
+      .from(monthlyItemStatus)
+      .where(and(eq(monthlyItemStatus.monthId, m.id), eq(monthlyItemStatus.itemId, s.internet.id)));
+    expect(internet.status).toBe("paid");
+  });
+
+  it("closes on the cycle's last day and then locks those dates only", async () => {
+    await startOn(25);
+    const s = await seedSeptember(db);
+    await s.expense(s.groceries.id, rs(100), "2026-10-01");
+    await expect(closeMonth(db, "2026-09", "2026-10-23")).rejects.toThrow(/can be closed from Sat 24 Oct/);
+    await closeMonth(db, "2026-09", "2026-10-24");
+    await expect(s.expense(s.groceries.id, rs(100), "2026-10-20")).rejects.toThrow(/closed/);
+    await expect(db.insert(expenses).values({ spentOn: "2026-10-20", amount: 1 })).rejects.toThrow();
+    const late = await s.expense(s.groceries.id, rs(100), "2026-10-26"); // October is open
+    expect(late.expense.id).toBeTruthy();
+  });
+
+  it("changing the start day keeps months contiguous", async () => {
+    await startOn(25);
+    await ensureMonth(db, "2026-09");
+    await ensureMonth(db, "2026-10");
+    await startOn(1);
+    const nov = await ensureMonth(db, "2026-11");
+    // November starts where October ends (25 Nov) and ends on the new start day.
+    expect([nov.startsOn, nov.endsOn]).toEqual(["2026-11-25", "2026-12-01"]);
   });
 });

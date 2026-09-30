@@ -1,7 +1,7 @@
-import { and, asc, count, desc, eq, gte, isNull, lt } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, isNull, lt, lte } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { categories, categoryBudgets, categoryMonthSummary, expenses, incomes, months, settings, transfers } from "@/db/schema";
-import { addMonths, firstDay, formatDay, formatMonth, lastDay, nextMonthStart } from "@/lib/dates";
+import { addDays, addMonths, formatDay, formatMonth, periodEnd, periodOf, periodStart, today, type Range } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { UserError } from "@/lib/errors";
 
@@ -19,6 +19,34 @@ export async function getMonth(db: Db, ym: string): Promise<Month | null> {
   return row ?? null;
 }
 
+// ---- Budget months as date ranges ----
+
+export async function getPeriodStartDay(db: Db): Promise<number> {
+  return (await getSettings(db)).periodStartDay;
+}
+
+/** Dates [from, to) of budget month `ym`: its row's range, or the one it would get. */
+export async function rangeOf(db: Db, ym: string): Promise<Range> {
+  const m = await getMonth(db, ym);
+  if (m) return { from: m.startsOn, to: m.endsOn };
+  const day = await getPeriodStartDay(db);
+  return { from: periodStart(ym, day), to: periodEnd(ym, day) };
+}
+
+/** The budget month a date belongs to. */
+export async function monthOfDate(db: Db, date: string): Promise<string> {
+  const [m] = await db
+    .select({ yearMonth: months.yearMonth })
+    .from(months)
+    .where(and(lte(months.startsOn, date), gt(months.endsOn, date)));
+  return m?.yearMonth ?? periodOf(date, await getPeriodStartDay(db));
+}
+
+/** The budget month today falls in (e.g. on 30 Sep with cycles from the 25th: "2026-09"). */
+export async function currentYm(db: Db): Promise<string> {
+  return monthOfDate(db, today());
+}
+
 /**
  * Return the month row, creating it on first write. A new month copies the
  * allocations (not leftovers) and alert % of the latest earlier month, and starts
@@ -33,10 +61,16 @@ export async function ensureMonth(db: Db, ym: string): Promise<Month> {
     const [earliest] = prior ? [prior] : await tx.select().from(months).orderBy(asc(months.yearMonth)).limit(1);
     const source = prior ?? earliest ?? null;
     const s = await getSettings(tx);
+    // Start where the previous month ends so months never overlap or leave gaps,
+    // even after the start day is changed; otherwise use the start day.
+    const [previous] = await tx.select().from(months).where(eq(months.yearMonth, addMonths(ym, -1)));
+    const [following] = await tx.select().from(months).where(eq(months.yearMonth, addMonths(ym, 1)));
+    const startsOn = previous?.endsOn ?? periodStart(ym, s.periodStartDay);
+    const endsOn = following?.startsOn ?? periodEnd(ym, s.periodStartDay);
 
     const [month] = await tx
       .insert(months)
-      .values({ yearMonth: ym, defaultAlertPct: source?.defaultAlertPct ?? s.defaultAlertPct })
+      .values({ yearMonth: ym, startsOn, endsOn, defaultAlertPct: source?.defaultAlertPct ?? s.defaultAlertPct })
       .onConflictDoNothing()
       .returning();
     if (!month) return (await getMonth(tx, ym))!;
@@ -95,6 +129,7 @@ export type CloseBlockers = {
 
 export async function closeBlockers(db: Db, ym: string, todayStr: string): Promise<CloseBlockers> {
   const month = await getMonth(db, ym);
+  const range = await rangeOf(db, ym);
   const earlier = await db
     .select({ yearMonth: months.yearMonth })
     .from(months)
@@ -103,14 +138,14 @@ export async function closeBlockers(db: Db, ym: string, todayStr: string): Promi
   const [{ n }] = await db
     .select({ n: count() })
     .from(expenses)
-    .where(and(isNull(expenses.categoryId), gte(expenses.spentOn, firstDay(ym)), lt(expenses.spentOn, nextMonthStart(ym))));
+    .where(and(isNull(expenses.categoryId), gte(expenses.spentOn, range.from), lt(expenses.spentOn, range.to)));
   const negative = month
     ? (await db.select().from(categoryMonthSummary).where(eq(categoryMonthSummary.monthId, month.id)))
         .filter((s) => s.remaining < 0)
         .map((s) => ({ name: s.name, remaining: s.remaining }))
     : [];
   return {
-    notEnded: todayStr < lastDay(ym),
+    notEnded: todayStr < addDays(range.to, -1),
     earlierOpen: earlier.map((e) => e.yearMonth),
     uncategorized: Number(n),
     negative,
@@ -128,7 +163,8 @@ export async function closeMonth(db: Db, ym: string, todayStr: string) {
     if (month.status === "closed") throw new UserError(`${formatMonth(ym)} is already closed.`);
 
     const b = await closeBlockers(tx, ym, todayStr);
-    if (b.notEnded) throw new UserError(`${formatMonth(ym)} can be closed from ${formatDay(lastDay(ym))}.`);
+    const lastDayOfMonth = addDays(month.endsOn, -1);
+    if (b.notEnded) throw new UserError(`${formatMonth(ym)} can be closed from ${formatDay(lastDayOfMonth)}.`);
     if (b.earlierOpen.length) throw new UserError(`Close ${formatMonth(b.earlierOpen[0])} first.`);
     if (b.uncategorized) throw new UserError(`Assign a category to ${b.uncategorized} expense(s) first.`);
     if (b.negative.length) {
@@ -147,7 +183,7 @@ export async function closeMonth(db: Db, ym: string, todayStr: string) {
           amount: s.remaining,
           reason: "month_close" as const,
           note: `${formatMonth(ym, { month: "long" })} leftovers`,
-          occurredOn: lastDay(ym),
+          occurredOn: lastDayOfMonth,
         })),
       );
     }

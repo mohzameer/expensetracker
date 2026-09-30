@@ -2,17 +2,18 @@ import { and, eq, lte, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { categoryMonthSummary, months, settings, transfers } from "@/db/schema";
 import { totalBalance } from "./accounts";
-import { clampToMonth, currentYearMonth, monthOf } from "@/lib/dates";
+import { clampToRange } from "@/lib/dates";
 import { UserError } from "@/lib/errors";
 import { formatMoney } from "@/lib/money";
-import { assertOpen, lockMonth } from "./months";
+import { assertOpen, currentYm, lockMonth, monthOfDate } from "./months";
 
 /**
  * Free money: what's in your accounts, minus what's still unspent in the budgets
  * of open months up to `ym` (that money is spoken for). Covers "from Savings" raise
  * a budget, so they lower this too.
  */
-export async function getSavingsBalance(db: Db, ym: string = currentYearMonth()): Promise<number> {
+export async function getSavingsBalance(db: Db, ym?: string): Promise<number> {
+  ym ??= await currentYm(db);
   const [committed] = await db
     .select({ total: sql<number>`coalesce(sum(greatest(${categoryMonthSummary.remaining}, 0)), 0)::bigint`.mapWith(Number) })
     .from(categoryMonthSummary)
@@ -60,7 +61,7 @@ export async function moveToCategory(
       }
     } else {
       await lockSavings(tx);
-      const balance = await getSavingsBalance(tx, monthOf(input.todayStr));
+      const balance = await getSavingsBalance(tx, await monthOfDate(tx, input.todayStr));
       if (balance < input.amount) throw new UserError(`Savings only has ${formatMoney(Math.max(balance, 0))} free.`);
     }
 
@@ -75,7 +76,7 @@ export async function moveToCategory(
         amount: input.amount,
         reason: input.reason ?? "cover",
         note: input.note ?? null,
-        occurredOn: clampToMonth(input.todayStr, input.ym),
+        occurredOn: clampToRange(input.todayStr, { from: month.startsOn, to: month.endsOn }),
       })
       .returning();
     return row;
@@ -87,7 +88,7 @@ export async function adjustSavings(
   db: Db,
   input: { direction: "in" | "out"; amount: number; note: string | null; todayStr: string },
 ) {
-  const ym = monthOf(input.todayStr) || currentYearMonth();
+  const ym = await monthOfDate(db, input.todayStr);
   return db.transaction(async (tx) => {
     const month = await lockMonth(tx, ym);
     assertOpen(month);

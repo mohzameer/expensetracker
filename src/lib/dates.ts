@@ -80,6 +80,42 @@ export function relativeDay(date: string, todayStr: string): string {
   return n < 0 ? `${-n} days ago` : `In ${n} days`;
 }
 
+// ---- Budget months (pay cycles) ----
+// A budget month can start on any day 1–28 (e.g. 25 = salary day). It is named
+// after the month it starts in: with startDay 25, "2026-09" is 25 Sep → 24 Oct.
+// startDay 1 gives ordinary calendar months.
+
+/** First day of budget month `ym`. */
+export function periodStart(ym: string, startDay: number): string {
+  return `${ym}-${String(startDay).padStart(2, "0")}`;
+}
+
+/** Exclusive end: the first day of the next budget month. */
+export function periodEnd(ym: string, startDay: number): string {
+  return periodStart(addMonths(ym, 1), startDay);
+}
+
+/** The budget month a date belongs to. */
+export function periodOf(date: string, startDay: number): string {
+  const ym = date.slice(0, 7);
+  return Number(date.slice(8, 10)) >= startDay ? ym : addMonths(ym, -1);
+}
+
+/** "25 Sep – 24 Oct" for a range [from, toExclusive). */
+export function formatRange(from: string, toExclusive: string): string {
+  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
+  return `${formatDay(from, opts)} – ${formatDay(addDays(toExclusive, -1), opts)}`;
+}
+
+export type Range = { from: string; to: string }; // to is exclusive
+
+/** Clamp a date into a range: used to date transfers made while viewing another month. */
+export function clampToRange(date: string, r: Range): string {
+  if (date < r.from) return r.from;
+  if (date >= r.to) return addDays(r.to, -1);
+  return date;
+}
+
 /** Clamp a date into a month: used to date transfers made while viewing another month. */
 export function clampToMonth(date: string, ym: string): string {
   if (date < firstDay(ym)) return firstDay(ym);

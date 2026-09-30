@@ -7,7 +7,7 @@ import { CheckCircle2, Info, Lock } from "lucide-react";
 import { MonthHeader } from "@/components/page-header";
 import { assignCategoryAction, closeMonthAction, moveToCategoryAction } from "@/server/actions";
 import type { getClosePage } from "@/server/queries";
-import { formatDay, formatMonth, lastDay } from "@/lib/dates";
+import { addDays, formatDay, formatMonth } from "@/lib/dates";
 import { formatAmount, formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
@@ -49,13 +49,13 @@ export function ClosePanel({ data }: { data: Data }) {
   const reasons: string[] = [];
   if (!data.month) reasons.push(`Nothing has been recorded for ${month}.`);
   if (blockers.earlierOpen.length) reasons.push(`Close ${formatMonth(blockers.earlierOpen[0])} first.`);
-  if (blockers.notEnded) reasons.push(`${month} can be closed from ${formatDay(lastDay(data.ym))}.`);
+  if (blockers.notEnded) reasons.push(`${month} can be closed from ${formatDay(addDays(data.range.to, -1))}.`);
   if (blocking) reasons.push(`Resolve ${blocking} blocking item${blocking === 1 ? "" : "s"} to continue.`);
   const canClose = !closed && reasons.length === 0;
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-[22px] px-4 py-6 lg:px-9 lg:py-7">
-      <MonthHeader ym={data.ym} href={(ym) => `/close/${ym}`} title={`Close ${formatMonth(data.ym)}`} />
+      <MonthHeader ym={data.ym} range={data.range} href={(ym) => `/close/${ym}`} title={`Close ${formatMonth(data.ym)}`} />
       <p className="-mt-2 text-[15px] text-muted-ink">
         Everything on one page. Resolve the blocking items, check the sweep, then close. A closed month is read-only.
       </p>
