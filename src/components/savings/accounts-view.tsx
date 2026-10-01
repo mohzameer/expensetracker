@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { ArrowLeftRight, BarChart3, Pencil, Plus } from "lucide-react";
+import { ArrowLeftRight, BarChart3, Pencil, Plus, X } from "lucide-react";
 import { Sheet } from "@/components/sheets/sheet";
 import {
   createAccountAction,
   moveToCategoryAction,
-  setAccountBalanceAction,
+  addAccountAdjustmentAction,
+  deleteAccountAdjustmentAction,
   setDefaultAccountAction,
   transferBetweenAccountsAction,
 } from "@/server/actions";
@@ -80,7 +81,7 @@ export function AccountsView({ data }: { data: Data }) {
             <span className={cn("font-display text-3xl font-semibold", a.balance < 0 && "text-bad")}>{formatMoney(a.balance, data.currency)}</span>
             <div className="flex gap-2">
               <button onClick={() => show({ kind: "balance", account: a })} className="flex min-h-10 items-center gap-1.5 rounded-[10px] border border-line-strong px-3 text-sm font-medium">
-                <Pencil aria-hidden className="size-3.5" /> Update balance
+                <Pencil aria-hidden className="size-3.5" /> Adjustments
               </button>
               {data.accounts.length > 1 && (
                 <button onClick={() => show({ kind: "transfer", fromId: a.id })} className="flex min-h-10 items-center gap-1.5 rounded-[10px] border border-line-strong px-3 text-sm font-medium">
@@ -157,7 +158,15 @@ export function AccountsView({ data }: { data: Data }) {
       </section>
 
       {open?.kind === "add" && <AddAccountSheet key={key} currency={data.currency} onClose={() => setOpen(null)} />}
-      {open?.kind === "balance" && <BalanceSheet key={key} account={open.account} currency={data.currency} onClose={() => setOpen(null)} />}
+      {open?.kind === "balance" && (
+        <AdjustmentsSheet
+          key={key}
+          account={data.accounts.find((a) => a.id === open.account.id) ?? open.account}
+          ledger={data.ledger}
+          currency={data.currency}
+          onClose={() => setOpen(null)}
+        />
+      )}
       {open?.kind === "transfer" && <TransferSheet key={key} data={data} fromId={open.fromId} onClose={() => setOpen(null)} />}
       {open?.kind === "topup" && <TopUpSheet key={key} data={data} onClose={() => setOpen(null)} />}
     </div>
@@ -200,47 +209,120 @@ function AddAccountSheet({ currency, onClose }: { currency: string; onClose: () 
   );
 }
 
-function BalanceSheet({ account, currency, onClose }: { account: Account; currency: string; onClose: () => void }) {
-  const [actual, setActual] = useState("");
-  const [note, setNote] = useState("");
+/** The account's + / − adjustments, each with a reason, and a row to add one. */
+function AdjustmentsSheet({
+  account,
+  ledger,
+  currency,
+  onClose,
+}: {
+  account: Account;
+  ledger: Data["ledger"];
+  currency: string;
+  onClose: () => void;
+}) {
+  const [sign, setSign] = useState<1 | -1>(-1);
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
   const [pending, start] = useTransition();
-  const value = parseMoney(actual);
-  const diff = value == null ? null : value - account.balance;
+  const value = parseMoney(amount) ?? 0;
+  const list = ledger.filter((l) => l.accountId === account.id && l.adjustmentId);
+
+  const add = () =>
+    start(async () => {
+      const res = await addAccountAdjustmentAction({ accountId: account.id, amount: sign * value, reason });
+      if (!res.ok) return void toast.error(res.error);
+      toast.success(`${sign > 0 ? "+" : "−"}${formatAmount(value)} to ${account.name}`);
+      setAmount("");
+      setReason("");
+    });
+  const remove = (id: string) =>
+    start(async () => {
+      const res = await deleteAccountAdjustmentAction(id);
+      if (!res.ok) toast.error(res.error);
+      else toast("Adjustment removed");
+    });
+
   return (
     <Sheet
       open
       onOpenChange={(o) => !o && onClose()}
-      title={`Update ${account.name}`}
-      description={<span className="text-muted-ink">Enter what the bank shows. The app records the difference as a correction.</span>}
+      title={`${account.name} adjustments`}
+      description={
+        <span className="text-muted-ink">
+          Balance {formatMoney(account.balance, currency)}. Add money that came in or went out outside the app, with a reason.
+        </span>
+      }
     >
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="bal" className={labelCls}>Balance now ({currency}) · app shows {formatAmount(account.balance)}</label>
-        <input id="bal" autoFocus inputMode="decimal" className={inputCls} value={actual} onChange={(e) => setActual(e.target.value)} />
-        {diff !== null && diff !== 0 && (
-          <span className="text-[13px] text-muted-ink">
-            Correction of {diff > 0 ? "+" : ""}
-            {formatAmount(diff)}
-          </span>
-        )}
+      <div className="flex flex-col gap-2.5 rounded-xl border border-line p-3">
+        <div className="flex gap-2">
+          <div role="radiogroup" aria-label="Plus or minus" className="grid shrink-0 grid-cols-2 gap-1 rounded-xl bg-paper p-1">
+            {([1, -1] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                role="radio"
+                aria-checked={sign === v}
+                aria-label={v > 0 ? "Plus (money in)" : "Minus (money out)"}
+                onClick={() => setSign(v)}
+                className={cn(
+                  "flex size-11 items-center justify-center rounded-[10px] text-xl font-semibold",
+                  sign === v ? (v > 0 ? "bg-ok text-white" : "bg-ink text-white") : "text-muted-ink",
+                )}
+              >
+                {v > 0 ? "+" : "−"}
+              </button>
+            ))}
+          </div>
+          <input
+            aria-label="Amount"
+            inputMode="decimal"
+            placeholder="Amount"
+            className={cn(inputCls, "min-w-0 flex-1")}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </div>
+        <input
+          aria-label="Reason"
+          placeholder="Reason, e.g. Bank charges, Interest"
+          className={inputCls}
+          value={reason}
+          maxLength={120}
+          onChange={(e) => setReason(e.target.value)}
+        />
+        <button disabled={pending || !value || !reason.trim()} className={primary} onClick={add}>
+          {pending ? "Saving…" : `Add ${sign > 0 ? "+" : "−"}${formatMoney(value, currency)}`}
+        </button>
       </div>
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="bal-note" className={labelCls}>Note (optional)</label>
-        <input id="bal-note" className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Bank charges" />
-      </div>
-      <button
-        disabled={pending || value == null}
-        className={primary}
-        onClick={() =>
-          start(async () => {
-            const res = await setAccountBalanceAction({ accountId: account.id, actual: value!, note: note || null });
-            if (!res.ok) return void toast.error(res.error);
-            toast.success(res.data.diff === 0 ? `${account.name} already matches` : `${account.name} updated`);
-            onClose();
-          })
-        }
-      >
-        {pending ? "Saving…" : "Save balance"}
-      </button>
+
+      {list.length === 0 ? (
+        <p className="text-center text-sm text-muted-ink">No adjustments yet.</p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-line-soft rounded-xl border border-line">
+          {list.map((l) => (
+            <li key={l.key} className="flex items-center gap-3 px-3.5 py-2.5">
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-[15px]">{l.what}</span>
+                <span className="text-xs text-muted-ink">{formatDay(l.date, { day: "numeric", month: "short" })}</span>
+              </div>
+              <span className={cn("font-semibold", l.amount >= 0 ? "text-ok" : "text-ink")}>
+                {l.amount >= 0 ? "+" : ""}
+                {formatAmount(l.amount)}
+              </span>
+              <button
+                type="button"
+                disabled={pending}
+                aria-label={`Remove ${l.what}`}
+                onClick={() => l.adjustmentId && remove(l.adjustmentId)}
+                className="flex size-9 items-center justify-center rounded-lg text-muted-ink hover:bg-paper hover:text-bad"
+              >
+                <X aria-hidden className="size-4" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </Sheet>
   );
 }

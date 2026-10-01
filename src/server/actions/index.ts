@@ -6,12 +6,19 @@ import { getSession, passcodeMatches } from "@/lib/auth";
 import { today } from "@/lib/dates";
 import * as s from "@/lib/schemas";
 import { runAction } from "@/server/action";
-import { createCategory, createItem, saveSetup } from "@/server/domain/catalog";
+import { createCategory, createItem, saveSetup, setChartHiddenCategories } from "@/server/domain/catalog";
 import { assignCategory, createExpense, deleteExpense, updateExpense } from "@/server/domain/expenses";
 import { closeMonth } from "@/server/domain/months";
 import { adjustSavings, moveToCategory } from "@/server/domain/transfers";
 import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
-import { createAccount, setAccountBalance, setDefaultAccount, transferBetweenAccounts } from "@/server/domain/accounts";
+import {
+  addAccountAdjustment,
+  createAccount,
+  deleteAccountAdjustment,
+  setAccountBalance,
+  setDefaultAccount,
+  transferBetweenAccounts,
+} from "@/server/domain/accounts";
 
 // ---- auth ----
 
@@ -105,6 +112,20 @@ export async function transferBetweenAccountsAction(input: z.input<typeof s.acco
   return runAction(s.accountTransferInput, input, (db, d) => transferBetweenAccounts(db, { ...d, todayStr: today() }));
 }
 
+export async function addAccountAdjustmentAction(input: z.input<typeof s.adjustmentInput>) {
+  return runAction(s.adjustmentInput, input, (db, d) => addAccountAdjustment(db, { ...d, todayStr: today() }));
+}
+
+export async function deleteAccountAdjustmentAction(entryId: string) {
+  return runAction(s.id, entryId, (db, d) => deleteAccountAdjustment(db, d));
+}
+
 export async function setDefaultAccountAction(accountId: string) {
   return runAction(s.id, accountId, (db, d) => setDefaultAccount(db, d));
+}
+
+// ---- charts ----
+
+export async function setChartHiddenCategoriesAction(ids: string[]) {
+  return runAction(z.array(s.id).max(500), ids, (db, d) => setChartHiddenCategories(db, d));
 }

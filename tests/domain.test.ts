@@ -6,8 +6,8 @@ import { closeBlockers, closeMonth, ensureMonth, getMonth, monthOfDate } from "@
 import { getSavingsBalance, moveToCategory } from "@/server/domain/transfers";
 import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
 import { assignCategory, createExpense, updateExpense } from "@/server/domain/expenses";
-import { createAccount, getAccounts, setAccountBalance, transferBetweenAccounts } from "@/server/domain/accounts";
-import { createItem, itemsForMonth, removeCategory, saveSetup } from "@/server/domain/catalog";
+import { addAccountAdjustment, createAccount, deleteAccountAdjustment, getAccounts, setAccountBalance, transferBetweenAccounts } from "@/server/domain/accounts";
+import { createItem, itemsForMonth, removeCategory, saveSetup, setChartHiddenCategories } from "@/server/domain/catalog";
 import { freshDb, rs, seedSeptember } from "./helpers";
 
 let db: Db;
@@ -419,5 +419,29 @@ describe("pay-cycle months (start on the 25th)", () => {
     const nov = await ensureMonth(db, "2026-11");
     // November starts where October ends (25 Nov) and ends on the new start day.
     expect([nov.startsOn, nov.endsOn]).toEqual(["2026-11-25", "2026-12-01"]);
+  });
+});
+
+describe("chart filter", () => {
+  it("saves the categories left out of the charts", async () => {
+    const s = await seedSeptember(db);
+    await setChartHiddenCategories(db, [s.groceries.id, s.groceries.id, s.dining.id]);
+    const [row] = await db.select().from(settings);
+    expect(row.chartHiddenCategoryIds.sort()).toEqual([s.groceries.id, s.dining.id].sort());
+    await setChartHiddenCategories(db, []);
+    expect((await db.select().from(settings))[0].chartHiddenCategoryIds).toEqual([]);
+  });
+});
+
+describe("account adjustments", () => {
+  it("add + and − with a reason, and remove one added by mistake", async () => {
+    const com = await createAccount(db, { name: "ComBank", opening: rs(1000), todayStr: "2026-09-29" });
+    const balance = async () => (await getAccounts(db))[0].balance;
+    await addAccountAdjustment(db, { accountId: com.id, amount: rs(250), reason: "Interest", todayStr: "2026-09-30" });
+    const fee = await addAccountAdjustment(db, { accountId: com.id, amount: -rs(35), reason: "Bank charges", todayStr: "2026-09-30" });
+    expect(await balance()).toBe(rs(1000 + 250 - 35));
+    await expect(addAccountAdjustment(db, { accountId: com.id, amount: rs(5), reason: " ", todayStr: "2026-09-30" })).rejects.toThrow(/reason/);
+    await deleteAccountAdjustment(db, fee.id);
+    expect(await balance()).toBe(rs(1250));
   });
 });

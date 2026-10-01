@@ -1,0 +1,1 @@
+ALTER TABLE "settings" ADD COLUMN "chart_hidden_category_ids" uuid[] DEFAULT '{}'::uuid[] NOT NULL;

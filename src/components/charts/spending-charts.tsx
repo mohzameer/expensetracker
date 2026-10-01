@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { ColumnChart } from "./column-chart";
+import { ChartFilter } from "./chart-filter";
 import type { getSpending } from "@/server/queries";
 import { addDays, addMonths, formatDay, formatMonth, formatRange, periodEnd, periodOf, periodStart } from "@/lib/dates";
 import { formatAmount, formatMoney } from "@/lib/money";
@@ -63,10 +64,12 @@ function buckets(period: Period, today: string, startDay: number): Bucket[] {
 export function SpendingCharts({ data, back }: { data: Data; back: string }) {
   const [period, setPeriod] = useState<Period>("daily");
   const [selected, setSelected] = useState<number | null>(null);
+  // Categories left out with the Filter button (saved to the account; applied here at once).
+  const [hidden, setHidden] = useState<string[]>(data.hidden);
 
   const series = useMemo(() => {
     return buckets(period, data.today, data.startDay).map((b) => {
-      const rows = data.rows.filter((r) => r.date >= b.from && r.date <= b.to);
+      const rows = data.rows.filter((r) => r.date >= b.from && r.date <= b.to && !(r.categoryId && hidden.includes(r.categoryId)));
       const byCat = new Map<string, { name: string; color: string; total: number }>();
       for (const r of rows) {
         const k = r.categoryId ?? "none";
@@ -80,7 +83,7 @@ export function SpendingCharts({ data, back }: { data: Data; back: string }) {
         categories: [...byCat.values()].sort((a, c) => c.total - a.total),
       };
     });
-  }, [period, data]);
+  }, [period, data, hidden]);
 
   const idx = selected ?? series.length - 1; // the latest day/week/month by default
   const sel = series[idx];
@@ -91,8 +94,10 @@ export function SpendingCharts({ data, back }: { data: Data; back: string }) {
 
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-[640px] flex-col gap-4 px-4 pt-5 pb-10 lg:max-w-4xl lg:pt-7">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <h1 className="font-display text-[26px] font-semibold">Spending</h1>
+        <div className="flex-1" />
+        <ChartFilter categories={data.filterCategories} hidden={hidden} onPreview={setHidden} />
         <Link href={back} aria-label="Close charts" className="flex size-11 items-center justify-center rounded-full border border-line bg-surface">
           <X className="size-5" />
         </Link>

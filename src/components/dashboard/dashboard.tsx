@@ -3,6 +3,7 @@ import { Download, Plus } from "lucide-react";
 import { MonthHeader } from "@/components/page-header";
 import { ColumnChart } from "@/components/charts/column-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
+import { ChartFilter } from "@/components/charts/chart-filter";
 import { MoneyBand } from "@/components/income/money-band";
 import type { getDashboard } from "@/server/queries";
 import { formatMonth } from "@/lib/dates";
@@ -113,10 +114,11 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
             </section>
 
             <section className="card flex flex-col gap-[18px] p-5 lg:p-6">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-[17px] font-semibold">Weekly spend</h2>
-                <span className="text-[13px] text-muted-ink">Dashed line = even pace ({formatMoney(weekPace, currency)} / wk)</span>
+                <ChartFilter categories={data.chartFilter.categories} hidden={data.chartFilter.hidden} />
               </div>
+              <span className="-mt-3 text-[13px] text-muted-ink">Dashed line = even pace ({formatMoney(weekPace, currency)} / wk)</span>
               {totals.spent === 0 ? (
                 <p className="text-[15px] text-muted-ink">No spending yet.</p>
               ) : (

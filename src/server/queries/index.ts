@@ -327,11 +327,13 @@ export async function getDashboard(db: Db, ym: string) {
     getSummaries(db, month),
     getMonthlyItems(db, month),
     db
-      .select({ day: expenses.spentOn, total: sum(expenses.amount).mapWith(Number) })
+      .select({ day: expenses.spentOn, categoryId: expenses.categoryId, total: sum(expenses.amount).mapWith(Number) })
       .from(expenses)
       .where(and(gte(expenses.spentOn, range.from), lt(expenses.spentOn, range.to)))
-      .groupBy(expenses.spentOn),
+      .groupBy(expenses.spentOn, expenses.categoryId),
   ]);
+  // The weekly chart leaves out the categories hidden with its filter.
+  const hidden = new Set(settings.chartHiddenCategoryIds);
 
   // 7-day blocks from the month's first day (e.g. 25 Sep, 2 Oct, … 23 Oct).
   const days = diffDays(range.to, range.from);
@@ -348,6 +350,7 @@ export async function getDashboard(db: Db, ym: string) {
   }
   let uncategorized = 0;
   for (const d of daily) {
+    if (d.categoryId && hidden.has(d.categoryId)) continue;
     const w = weeks.find((x) => d.day >= x.from && d.day < x.to);
     if (w) w.total += d.total;
   }
@@ -374,7 +377,12 @@ export async function getDashboard(db: Db, ym: string) {
     accounts: accountList,
     plan,
     weeks: weeks.map((w) => ({ label: w.label, detail: w.detail, total: w.total, days: diffDays(w.to, w.from) })),
-    evenPacePerDay: days ? allocated / days : 0,
+    // Even pace for the categories still shown.
+    evenPacePerDay: days ? summaries.filter((s) => !hidden.has(s.categoryId)).reduce((a, s) => a + s.effectiveAllocation, 0) / days : 0,
+    chartFilter: {
+      hidden: settings.chartHiddenCategoryIds,
+      categories: summaries.map((s) => ({ id: s.categoryId, name: s.name, color: s.color })),
+    },
   };
 }
 
@@ -404,10 +412,18 @@ export async function getMoneyPage(db: Db) {
     getCatalog(db),
   ]);
 
-  const KIND = { opening: "Opening balance", adjustment: "Correction", transfer: "Transfer" } as const;
+  const KIND = { opening: "Opening balance", adjustment: "Adjustment", transfer: "Transfer" } as const;
   const ledger = [
-    ...entries.map((e) => ({ key: e.id, accountId: e.accountId, date: e.date, what: e.note ?? KIND[e.kind], type: KIND[e.kind], amount: e.amount })),
-    ...incomeIn.map((i) => ({ key: i.id, accountId: i.accountId!, date: i.date!, what: i.source, type: "Income", amount: i.amount })),
+    ...entries.map((e) => ({
+      key: e.id,
+      accountId: e.accountId,
+      date: e.date,
+      what: e.note ?? KIND[e.kind],
+      type: KIND[e.kind],
+      amount: e.amount,
+      adjustmentId: e.kind === "adjustment" ? (e.id as string | null) : null, // removable from the Adjustments list
+    })),
+    ...incomeIn.map((i) => ({ key: i.id, accountId: i.accountId!, date: i.date!, what: i.source, type: "Income", amount: i.amount, adjustmentId: null })),
     ...spendDays.map((d) => ({
       key: `x-${d.accountId}-${d.date}`,
       accountId: d.accountId!,
@@ -415,6 +431,7 @@ export async function getMoneyPage(db: Db) {
       what: `${d.n} expense${d.n === 1 ? "" : "s"}`,
       type: "Spending",
       amount: -d.total,
+      adjustmentId: null,
     })),
   ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
@@ -449,9 +466,19 @@ export async function getSpending(db: Db) {
       .where(and(gte(expenses.spentOn, from), lte(expenses.spentOn, t)))
       .groupBy(expenses.spentOn, expenses.categoryId, categories.name, categories.color),
   ]);
+  const catalog = await getCatalog(db);
   return {
     today: t,
     startDay: settings.periodStartDay,
+    hidden: settings.chartHiddenCategoryIds,
+    // Every category that appears in the chart period or is in use now, for the filter.
+    filterCategories: [
+      ...new Map(
+        [...catalog.categories, ...rows.filter((r) => r.categoryId).map((r) => ({ id: r.categoryId!, name: r.name!, color: r.color! }))].map(
+          (c) => [c.id, c],
+        ),
+      ).values(),
+    ],
     currency: settings.currencySymbol,
     rows: rows.map((r) => ({ ...r, name: r.name ?? "Needs category", color: r.color ?? "var(--faint)" })),
   };

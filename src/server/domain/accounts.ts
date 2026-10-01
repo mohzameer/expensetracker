@@ -85,3 +85,26 @@ export async function setDefaultAccount(db: Db, accountId: string) {
   await balanceOf(db, accountId);
   await db.update(settings).set({ defaultAccountId: accountId }).where(eq(settings.id, 1));
 }
+
+/** A + or − adjustment to an account with its reason (interest, bank charges, cash you forgot…). */
+export async function addAccountAdjustment(
+  db: Db,
+  input: { accountId: string; amount: number; reason: string; todayStr: string },
+) {
+  if (input.amount === 0) throw new UserError("Enter an amount above zero.");
+  if (!input.reason.trim()) throw new UserError("Give a reason for the adjustment.");
+  const account = await balanceOf(db, input.accountId);
+  const [row] = await db
+    .insert(accountEntries)
+    .values({ accountId: input.accountId, occurredOn: input.todayStr, amount: input.amount, kind: "adjustment", note: input.reason.trim() })
+    .returning();
+  return { id: row.id, name: account.name };
+}
+
+/** Remove an adjustment added by mistake (opening balances and transfers can't be removed here). */
+export async function deleteAccountAdjustment(db: Db, id: string) {
+  const [row] = await db.select().from(accountEntries).where(eq(accountEntries.id, id));
+  if (!row) return;
+  if (row.kind !== "adjustment") throw new UserError("Only adjustments can be removed.");
+  await db.delete(accountEntries).where(eq(accountEntries.id, id));
+}

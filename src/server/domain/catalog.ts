@@ -243,3 +243,8 @@ export async function saveSetup(db: Db, p: SetupPayload) {
     return { ok: true };
   });
 }
+
+/** Categories to leave out of the spending charts (saved for every device). */
+export async function setChartHiddenCategories(db: Db, ids: string[]) {
+  await db.update(settings).set({ chartHiddenCategoryIds: [...new Set(ids)] }).where(eq(settings.id, 1));
+}

@@ -26,6 +26,11 @@ export const newExpenseInput = expenseInput;
 
 export const newAccountInput = z.object({ name, opening: z.number().int().min(-1e13).max(1e13) });
 export const setBalanceInput = z.object({ accountId: id, actual: z.number().int().min(-1e13).max(1e13), note: z.string().trim().max(200).nullable() });
+export const adjustmentInput = z.object({
+  accountId: id,
+  amount: z.number().int().refine((n) => n !== 0, "Enter an amount above zero").refine((n) => Math.abs(n) <= 1e13),
+  reason: z.string().trim().min(1, "Give a reason").max(120),
+});
 export const accountTransferInput = z.object({ fromId: id, toId: id, amount, note: z.string().trim().max(200).nullable() });
 
 export const newCategoryInput = z.object({

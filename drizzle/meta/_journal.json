@@ -71,6 +71,13 @@
       "when": 1790732264330,
       "tag": "0009_views_use_ranges",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790853548604,
+      "tag": "0010_chart_hidden_categories",
+      "breakpoints": true
     }
   ]
 }

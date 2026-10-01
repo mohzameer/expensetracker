@@ -1,4 +1,6 @@
+import { eq } from "drizzle-orm";
 import { createDb, migrateDb, type Db } from "@/db/client";
+import { items } from "@/db/schema";
 import { createCategory, createItem } from "@/server/domain/catalog";
 import { ensureMonth } from "@/server/domain/months";
 import { createExpense } from "@/server/domain/expenses";
@@ -18,6 +20,9 @@ export async function seedSeptember(db: Db) {
   const dining = await createCategory(db, { name: "Dining", allocation: rs(12000), ym: "2026-09" });
   const utilities = await createCategory(db, { name: "Utilities", allocation: rs(18000), ym: "2026-09" });
   const internet = await createItem(db, { categoryId: utilities.id, name: "Internet", kind: "monthly", expectedAmount: rs(3990), ym: "2026-09" });
+  // Items only count as due in months after they were created; pin it to September
+  // so the tests don't depend on today's date.
+  await db.update(items).set({ createdAt: new Date("2026-09-01T00:00:00Z") }).where(eq(items.id, internet.id));
   const expense = (categoryId: string | null, amount: number, spentOn = "2026-09-10", itemId: string | null = null) =>
     createExpense(db, { spentOn, categoryId, itemId, amount, note: null });
   return { groceries, dining, utilities, internet, expense };

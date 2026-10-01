@@ -38,6 +38,8 @@ export const settings = pgTable(
     defaultAccountId: uuid().references((): AnyPgColumn => accounts.id),
     // Day a budget month starts (e.g. 25 = salary day: "September" runs 25 Sep → 24 Oct). 1 = calendar months.
     periodStartDay: smallint().notNull().default(1),
+    // Categories left out of the spending charts (e.g. big fixed payments), shared across devices.
+    chartHiddenCategoryIds: uuid().array().notNull().default(sql`'{}'::uuid[]`),
   },
   () => [
     check("settings_singleton", sql`id = 1`),
