@@ -60,8 +60,10 @@ function initialState(data: Data): CatState[] {
 
 const field = "min-h-10 w-full rounded-[10px] border border-line-strong bg-surface px-2.5 text-[15px] outline-none focus:border-teal disabled:bg-paper";
 const label = "text-xs font-semibold text-muted-ink";
-/** Item rows: name · kind · amount · actions (skip this month, remove). */
-const ITEM_GRID = "grid grid-cols-[minmax(0,1fr)_110px_110px_84px] gap-2";
+/** Item rows: name · kind · amount · one action button. */
+const ITEM_GRID = "grid grid-cols-[minmax(0,1fr)_110px_110px_40px] gap-2";
+/** A monthly row being removed shows two buttons (skip instead, undo). */
+const ITEM_GRID_TWO = "grid grid-cols-[minmax(0,1fr)_110px_110px_84px] gap-2";
 
 export function SetupForm({ data }: { data: Data }) {
   const initial = useMemo(() => initialState(data), [data]);
@@ -331,7 +333,7 @@ export function SetupForm({ data }: { data: Data }) {
                   )}
                   {c.items.map((i) => (
                     <div key={i.key} className="flex flex-col gap-0.5">
-                    <div className={cn(ITEM_GRID, "items-center")}>
+                    <div className={cn(i.kind === "monthly" && i.removed ? ITEM_GRID_TWO : ITEM_GRID, "items-center")}>
                       <input
                         aria-label="Item name"
                         autoFocus={!i.id && !i.name}
@@ -361,7 +363,7 @@ export function SetupForm({ data }: { data: Data }) {
                       />
                       <div className="flex items-center justify-end gap-1">
                         {/* Offered once a monthly item is being removed: sit out this month instead of going for good.
-                            It stays on a skipped row so the skip can be switched off again. */}
+                            On a skipped row it takes the remove button's place, to switch the skip off again. */}
                         {i.kind === "monthly" && (i.removed || i.skipped) && (
                           <button
                             type="button"
@@ -389,6 +391,7 @@ export function SetupForm({ data }: { data: Data }) {
                             <CalendarOff aria-hidden className="size-4" />
                           </button>
                         )}
+                        {!(i.kind === "monthly" && i.skipped && !i.removed) && (
                         <button
                           type="button"
                           aria-label={i.removed ? `Restore ${i.name}` : `Remove ${i.name}`}
@@ -398,6 +401,7 @@ export function SetupForm({ data }: { data: Data }) {
                         >
                           {i.removed ? <Undo2 className="size-4" /> : <X className="size-4" />}
                         </button>
+                        )}
                       </div>
                     </div>
                     {i.removed ? (
@@ -405,7 +409,7 @@ export function SetupForm({ data }: { data: Data }) {
                         Will be removed on save.{i.kind === "monthly" && ` To leave it out of ${monthName} only, use the calendar button.`}
                       </span>
                     ) : i.kind === "monthly" && i.skipped ? (
-                      <span className="pl-2.5 text-xs font-medium text-warn">Skipped for {monthName} — back next month.</span>
+                      <span className="pl-2.5 text-xs font-medium text-warn">Skipped for {monthName} — back next month. Tap the calendar to include it again.</span>
                     ) : null}
                     {/* Last month's actual spend on this item; hidden when there was none. */}
                     {i.id && data.prevSpentByItem[i.id] ? (
