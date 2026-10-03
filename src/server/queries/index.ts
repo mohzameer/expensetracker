@@ -482,6 +482,58 @@ export async function getSpending(db: Db) {
   };
 }
 
+/** Analysis page: every expense of the last 13 budget months plus the lookups; the page slices it client-side. */
+export async function getAnalysis(db: Db) {
+  const t = today();
+  const settings = await getSettings(db);
+  const from = periodStart(addMonths(periodOf(t, settings.periodStartDay), -12), settings.periodStartDay);
+  const [rows, cats, its, accountList] = await Promise.all([
+    db
+      .select(expenseColumns)
+      .from(expenses)
+      .leftJoin(categories, eq(categories.id, expenses.categoryId))
+      .leftJoin(items, eq(items.id, expenses.itemId))
+      .where(gte(expenses.spentOn, from))
+      .orderBy(desc(expenses.spentOn), desc(expenses.createdAt)),
+    // Archived categories and items too: they still have history.
+    db.select({ id: categories.id, name: categories.name, color: categories.color, archivedAt: categories.archivedAt }).from(categories).orderBy(asc(categories.sortOrder), asc(categories.name)),
+    db
+      .select({
+        categoryId: items.categoryId,
+        name: items.name,
+        kind: items.kind,
+        expectedAmount: items.expectedAmount,
+        defaultAmount: items.defaultAmount,
+        ym: months.yearMonth,
+        archivedAt: items.archivedAt,
+      })
+      .from(items)
+      .leftJoin(months, eq(months.id, items.monthId))
+      .orderBy(asc(items.sortOrder), asc(items.name)),
+    getAccounts(db, true),
+  ]);
+  return {
+    today: t,
+    from,
+    startDay: settings.periodStartDay,
+    currency: settings.currencySymbol,
+    rows: rows.map((r) => ({
+      id: r.id,
+      date: r.spentOn,
+      amount: r.amount,
+      note: r.note,
+      categoryId: r.categoryId,
+      categoryName: r.categoryName,
+      color: r.color,
+      itemName: r.itemName,
+      accountId: r.accountId,
+    })),
+    categories: cats.map((c) => ({ id: c.id, name: c.name, color: c.color, archived: !!c.archivedAt })),
+    items: its.map(({ archivedAt, ...i }) => ({ ...i, archived: !!archivedAt })),
+    accounts: accountList.map((a) => ({ id: a.id, name: a.name })),
+  };
+}
+
 export async function getClosePage(db: Db, ym: string) {
   const month = await getMonth(db, ym);
   const range = await rangeOf(db, ym);

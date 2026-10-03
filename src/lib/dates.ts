@@ -63,6 +63,12 @@ export function diffDays(a: string, b: string): number {
   return Math.round((utc(a).getTime() - utc(b).getTime()) / 86_400_000);
 }
 
+/** Monday of the week containing `date`. */
+export function weekStart(date: string): string {
+  const dow = (utc(date).getUTCDay() + 6) % 7;
+  return addDays(date, -dow);
+}
+
 export function formatDay(date: string, opts: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short" }): string {
   return new Intl.DateTimeFormat("en-GB", { ...opts, timeZone: "UTC" }).format(utc(date));
 }

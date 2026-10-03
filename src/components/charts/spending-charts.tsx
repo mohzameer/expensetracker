@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { ChevronRight, Search, X } from "lucide-react";
 import { ColumnChart } from "./column-chart";
 import { ChartFilter } from "./chart-filter";
 import type { getSpending } from "@/server/queries";
-import { addDays, addMonths, formatDay, formatMonth, formatRange, periodEnd, periodOf, periodStart } from "@/lib/dates";
+import { addDays, addMonths, formatDay, formatMonth, formatRange, periodEnd, periodOf, periodStart, weekStart } from "@/lib/dates";
 import { formatAmount, formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
@@ -19,12 +19,6 @@ const PERIODS: { id: Period; label: string; unit: string }[] = [
   { id: "weekly", label: "Weekly", unit: "week" },
   { id: "monthly", label: "Monthly", unit: "month" },
 ];
-
-/** Monday of the week containing `date`. */
-function weekStart(date: string) {
-  const dow = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7;
-  return addDays(date, -dow);
-}
 
 const short = (d: string) => formatDay(d, { day: "numeric", month: "short" });
 
@@ -102,6 +96,16 @@ export function SpendingCharts({ data, back }: { data: Data; back: string }) {
           <X className="size-5" />
         </Link>
       </div>
+
+      {/* The phone's way into Analysis (desktop has it in the sidebar). */}
+      <Link
+        href={`/analysis?from=${encodeURIComponent(`/charts?from=${encodeURIComponent(back)}`)}`}
+        className="flex min-h-11 items-center gap-2.5 rounded-xl border border-line bg-surface px-3.5 lg:hidden"
+      >
+        <Search aria-hidden className="size-[18px] text-muted-ink" />
+        <span className="flex-1 text-[15px] font-medium">Analyse an item or category</span>
+        <ChevronRight aria-hidden className="size-[18px] text-muted-ink" />
+      </Link>
 
       <div role="tablist" aria-label="Period" className="grid grid-cols-3 gap-1 rounded-xl bg-line-soft p-1">
         {PERIODS.map((p) => (
