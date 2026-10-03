@@ -360,8 +360,9 @@ export function SetupForm({ data }: { data: Data }) {
                         className={cn(field, "text-right", i.kind === "monthly" && !parseMoney(i.amount) && !i.removed && "border-warn-bar", i.kind === "monthly" && i.skipped && !i.removed && "text-faint line-through", i.removed && "opacity-50")}
                       />
                       <div className="flex items-center justify-end gap-1">
-                        {/* Monthly items can sit out one month instead of being removed for good. */}
-                        {i.kind === "monthly" && (
+                        {/* Offered once a monthly item is being removed: sit out this month instead of going for good.
+                            It stays on a skipped row so the skip can be switched off again. */}
+                        {i.kind === "monthly" && (i.removed || i.skipped) && (
                           <button
                             type="button"
                             aria-pressed={i.skipped && !i.removed}
@@ -377,7 +378,7 @@ export function SetupForm({ data }: { data: Data }) {
                                 ? `Skip ${monthName} only instead of removing`
                                 : i.skipped
                                   ? `Skipped for ${monthName}. Click to include it again.`
-                                  : `Skip ${monthName} only (no cap, not due; back next month)`
+                                  : `Skip ${monthName} only`
                             }
                             onClick={() => updateItem(c.key, i.key, i.removed ? { removed: false, skipped: true } : { skipped: !i.skipped })}
                             className={cn(
