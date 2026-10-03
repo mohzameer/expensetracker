@@ -147,6 +147,8 @@ export const items = pgTable(
     kind: text({ enum: ["monthly", "one_off"] }).notNull(),
     expectedAmount: money(), // monthly items
     defaultAmount: money(), // one-off prefill
+    // Optional day of the month a monthly item is due (1–31); null = no particular day.
+    dueDay: integer(),
     // One-off items belong to the month they were added for; monthly items (null) carry into every month.
     monthId: uuid().references(() => months.id),
     sortOrder: integer().notNull().default(0),
@@ -168,6 +170,7 @@ export const items = pgTable(
     check("items_monthly_expected", sql`kind <> 'monthly' or expected_amount is not null`),
     check("items_expected_positive", sql`expected_amount is null or expected_amount > 0`),
     check("items_default_positive", sql`default_amount is null or default_amount > 0`),
+    check("items_due_day", sql`due_day is null or due_day between 1 and 31`),
   ],
 );
 

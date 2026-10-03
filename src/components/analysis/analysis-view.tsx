@@ -6,15 +6,17 @@ import { X } from "lucide-react";
 import { CreatableCombobox, type ComboOption } from "@/components/combobox";
 import { itemKey, rowKey } from "@/lib/analysis";
 import { cn } from "@/lib/utils";
+import { Breakdown } from "./breakdown";
 import { FindEntries } from "./find-entries";
 import { History } from "./history";
 import { Months } from "./months";
 import { RangeControl, resolveRange, type Data, type RangeState, type Target } from "./parts";
 import { TopItems } from "./top-items";
 
-type Tab = "history" | "months" | "top" | "find";
+type Tab = "history" | "breakdown" | "months" | "top" | "find";
 const TABS: { id: Tab; label: string }[] = [
   { id: "history", label: "History" },
+  { id: "breakdown", label: "Breakdown" },
   { id: "months", label: "Monthly" },
   { id: "top", label: "Top items" },
   { id: "find", label: "Find" },
@@ -76,14 +78,15 @@ export function AnalysisView({ data, back }: { data: Data; back: string }) {
         </Link>
       </div>
 
-      <div role="tablist" aria-label="View" className="grid grid-cols-4 gap-1 rounded-xl bg-line-soft p-1">
+      {/* Five tabs: a scrolling strip on a phone, an even row on desktop. */}
+      <div role="tablist" aria-label="View" className="flex gap-1 overflow-x-auto rounded-xl bg-line-soft p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {TABS.map((t) => (
           <button
             key={t.id}
             role="tab"
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
-            className={cn("min-h-10 rounded-[10px] text-sm font-semibold sm:text-[15px]", tab === t.id ? "bg-surface shadow-sm" : "text-muted-ink")}
+            className={cn("min-h-10 shrink-0 grow rounded-[10px] px-3 text-sm font-semibold whitespace-nowrap sm:text-[15px]", tab === t.id ? "bg-surface shadow-sm" : "text-muted-ink")}
           >
             {t.label}
           </button>
@@ -103,9 +106,10 @@ export function AnalysisView({ data, back }: { data: Data; back: string }) {
           />
         </div>
       )}
-      {tab !== "months" && <RangeControl value={rangeState} onChange={setRangeState} data={data} />}
+      {tab !== "months" && tab !== "breakdown" && <RangeControl value={rangeState} onChange={setRangeState} data={data} />}
 
       {tab === "history" && <History data={data} rows={rows} target={target} range={range} onPick={pick} />}
+      {tab === "breakdown" && <Breakdown data={data} onPick={pick} />}
       {tab === "months" && <Months data={data} rows={rows} />}
       {tab === "top" && <TopItems data={data} range={range} onPick={pick} />}
       {tab === "find" && <FindEntries data={data} range={range} />}

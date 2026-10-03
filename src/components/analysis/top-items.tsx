@@ -13,7 +13,7 @@ export function TopItems({ data, range, onPick }: { data: Data; range: Range; on
   const ym = monthOfRange(range, data.startDay);
   const list = useMemo(() => {
     const rows = data.rows.filter((r: Row) => inRange(r.date, range));
-    return topItems(rows, data.items, data.categories.filter((c) => !c.archived), ym).filter((t) => !categoryId || t.categoryId === categoryId);
+    return topItems(rows, data.items, data.categories, ym, data.startDay).filter((t) => !categoryId || t.categoryId === categoryId);
   }, [data, range, ym, categoryId]);
   const total = list.reduce((a, t) => a + t.total, 0);
   const planned = list.reduce((a, t) => a + (t.planned ?? 0), 0);

@@ -8,6 +8,8 @@ export const yearMonth = z.string().refine(isYearMonth, "Invalid month");
 export const amount = z.number().int().positive("Enter an amount above zero").max(1e13);
 export const optionalAmount = z.number().int().positive().max(1e13).nullable();
 export const alertPct = z.number().int().min(0).max(100);
+/** Optional day of the month a monthly item is due. */
+export const dueDay = z.number().int().min(1, "Due day is 1–31").max(31, "Due day is 1–31").nullable().default(null);
 export const name = z.string().trim().min(1, "Name is required").max(60);
 export const color = z.string().regex(/^#[0-9A-Fa-f]{6}$/);
 export const id = z.uuid();
@@ -46,6 +48,7 @@ export const newItemInput = z
     kind: z.enum(["monthly", "one_off"]),
     expectedAmount: optionalAmount,
     defaultAmount: optionalAmount,
+    dueDay,
     ym: yearMonth,
   })
   .refine((v) => v.kind !== "monthly" || v.expectedAmount, { message: "Monthly items need an expected amount" });
@@ -76,6 +79,7 @@ const setupItem = z.object({
   kind: z.enum(["monthly", "one_off"]),
   expectedAmount: optionalAmount,
   defaultAmount: optionalAmount,
+  dueDay,
   removed: z.boolean(),
 });
 

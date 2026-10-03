@@ -85,6 +85,13 @@
       "when": 1791017407207,
       "tag": "0011_caps_from_items",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791023413160,
+      "tag": "0012_item_due_day",
+      "breakpoints": true
     }
   ]
 }

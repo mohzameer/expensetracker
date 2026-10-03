@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gt, gte, isNotNull, isNull, lt, lte, sql, sum } fro
 import type { Db } from "@/db";
 import { accountEntries, accounts, categories, categoryBudgets, categoryMonthSummary, expenses, incomes, items, monthlyItemStatus, months } from "@/db/schema";
 import { getAccounts, totalBalance } from "@/server/domain/accounts";
-import { addDays, addMonths, diffDays, formatDay, formatRange, periodOf, periodStart, today, type Range } from "@/lib/dates";
+import { addDays, addMonths, diffDays, dueDateIn, formatDay, formatRange, periodOf, periodStart, today, type Range } from "@/lib/dates";
 import { stateAfter } from "@/lib/budget";
 import { closeBlockers, currentYm, ensureMonth, getMonth, getSettings, monthOfDate, rangeOf, type Month } from "@/server/domain/months";
 import { itemsForMonth } from "@/server/domain/catalog";
@@ -32,6 +32,7 @@ export type CatalogItem = {
   kind: "monthly" | "one_off";
   expectedAmount: number | null;
   defaultAmount: number | null;
+  dueDay: number | null;
 };
 
 export type DueItem = {
@@ -42,6 +43,8 @@ export type DueItem = {
   expected: number;
   paid: number;
   status: "unpaid" | "partial" | "paid";
+  /** When it falls due in this month, if the item has a due day. */
+  dueDate: string | null;
 };
 
 export type MonthInfo = { yearMonth: string; status: "open" | "closed"; defaultAlertPct: number } | null;
@@ -106,12 +109,18 @@ export async function getMonthlyItems(db: Db, month: Month | null): Promise<DueI
       expected: monthlyItemStatus.expected,
       paid: monthlyItemStatus.paid,
       status: monthlyItemStatus.status,
+      dueDay: items.dueDay,
     })
     .from(monthlyItemStatus)
     .innerJoin(categories, eq(categories.id, monthlyItemStatus.categoryId))
+    .innerJoin(items, eq(items.id, monthlyItemStatus.itemId))
     .where(eq(monthlyItemStatus.monthId, month.id))
     .orderBy(asc(categories.sortOrder), asc(monthlyItemStatus.name));
-  return rows;
+  const range = { from: month.startsOn, to: month.endsOn };
+  return rows
+    .map(({ dueDay, ...r }) => ({ ...r, dueDate: dueDay ? dueDateIn(range, dueDay) : null }))
+    // Dated items first, in date order; the rest keep their category order (sort is stable).
+    .sort((a, b) => (a.dueDate && b.dueDate ? a.dueDate.localeCompare(b.dueDate) : Number(!a.dueDate) - Number(!b.dueDate)));
 }
 
 async function inboxCount(db: Db) {
@@ -504,8 +513,10 @@ export async function getAnalysis(db: Db) {
         kind: items.kind,
         expectedAmount: items.expectedAmount,
         defaultAmount: items.defaultAmount,
+        dueDay: items.dueDay,
         ym: months.yearMonth,
         archivedAt: items.archivedAt,
+        createdAt: items.createdAt,
       })
       .from(items)
       .leftJoin(months, eq(months.id, items.monthId))
@@ -529,7 +540,7 @@ export async function getAnalysis(db: Db) {
       accountId: r.accountId,
     })),
     categories: cats.map((c) => ({ id: c.id, name: c.name, color: c.color, archived: !!c.archivedAt })),
-    items: its.map(({ archivedAt, ...i }) => ({ ...i, archived: !!archivedAt })),
+    items: its.map(({ archivedAt, createdAt, ...i }) => ({ ...i, archived: !!archivedAt, createdOn: createdAt.toISOString().slice(0, 10) })),
     accounts: accountList.map((a) => ({ id: a.id, name: a.name })),
   };
 }
@@ -623,7 +634,7 @@ export async function getSetupPage(db: Db, ym: string) {
       alertPct: byCat.get(c.id)?.alertPct ?? null,
       items: catalog.items
         .filter((i) => i.categoryId === c.id)
-        .map((i) => ({ id: i.id, name: i.name, kind: i.kind, expectedAmount: i.expectedAmount, defaultAmount: i.defaultAmount })),
+        .map((i) => ({ id: i.id, name: i.name, kind: i.kind, expectedAmount: i.expectedAmount, defaultAmount: i.defaultAmount, dueDay: i.dueDay })),
     })),
   };
 }

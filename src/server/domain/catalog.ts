@@ -36,6 +36,8 @@ export type NewItem = {
   kind: "monthly" | "one_off";
   expectedAmount?: number | null;
   defaultAmount?: number | null;
+  /** Optional day of the month a monthly item is due (1–31). */
+  dueDay?: number | null;
   /** The month a one-off item is for (it won't appear in other months). */
   ym: string;
 };
@@ -50,6 +52,7 @@ export async function itemsForMonth(db: Db, monthId: string | null) {
       kind: items.kind,
       expectedAmount: items.expectedAmount,
       defaultAmount: items.defaultAmount,
+      dueDay: items.dueDay,
     })
     .from(items)
     .where(
@@ -73,6 +76,7 @@ export async function createItem(db: Db, input: NewItem) {
       kind: input.kind,
       expectedAmount: input.kind === "monthly" ? input.expectedAmount : null,
       defaultAmount: input.kind === "one_off" ? (input.defaultAmount ?? null) : null,
+      dueDay: input.kind === "monthly" ? (input.dueDay ?? null) : null,
       monthId,
       sortOrder: (top ?? -1) + 1,
     })
@@ -126,6 +130,7 @@ export type SetupItem = {
   kind: "monthly" | "one_off";
   expectedAmount: number | null;
   defaultAmount: number | null;
+  dueDay?: number | null;
   removed: boolean;
 };
 
@@ -229,6 +234,7 @@ export async function saveSetup(db: Db, p: SetupPayload) {
           kind: it.kind,
           expectedAmount: it.kind === "monthly" ? it.expectedAmount : null,
           defaultAmount: it.kind === "one_off" ? it.defaultAmount : null,
+          dueDay: it.kind === "monthly" ? (it.dueDay ?? null) : null,
           // One-offs belong to this month; switching an item to monthly makes it carry over.
           monthId: it.kind === "one_off" ? month.id : null,
           sortOrder: itemOrder++,

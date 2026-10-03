@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 
 type Data = Awaited<ReturnType<typeof getSetupPage>>;
 type Kind = "monthly" | "one_off";
-type ItemState = { key: string; id: string | null; name: string; kind: Kind; amount: string; removed: boolean };
+type ItemState = { key: string; id: string | null; name: string; kind: Kind; amount: string; dueDay: string; removed: boolean };
 type CatState = {
   key: string;
   id: string | null;
@@ -52,6 +52,7 @@ function initialState(data: Data): CatState[] {
       name: i.name,
       kind: i.kind,
       amount: toInputValue(i.kind === "monthly" ? i.expectedAmount : i.defaultAmount),
+      dueDay: i.dueDay == null ? "" : String(i.dueDay),
       removed: false,
     })),
   }));
@@ -59,6 +60,8 @@ function initialState(data: Data): CatState[] {
 
 const field = "min-h-10 w-full rounded-[10px] border border-line-strong bg-surface px-2.5 text-[15px] outline-none focus:border-teal disabled:bg-paper";
 const label = "text-xs font-semibold text-muted-ink";
+/** Item rows: name · kind · due day · amount · remove. */
+const ITEM_GRID = "grid grid-cols-[minmax(0,1fr)_100px_56px_100px_40px] gap-2";
 
 export function SetupForm({ data }: { data: Data }) {
   const initial = useMemo(() => initialState(data), [data]);
@@ -129,6 +132,7 @@ export function SetupForm({ data }: { data: Data }) {
         if (!i.name.trim()) return void toast.error(`${c.name}: every item needs a name.`);
         if (i.kind === "monthly" && !parseMoney(i.amount)) return void toast.error(`${i.name}: monthly items need an expected amount.`);
         if (i.amount && parseMoney(i.amount) == null) return void toast.error(`${i.name}: the amount isn't valid.`);
+        if (i.kind === "monthly" && i.dueDay && (Number(i.dueDay) < 1 || Number(i.dueDay) > 31)) return void toast.error(`${i.name}: the due day is a day of the month, 1–31.`);
       }
     }
     const names = live.map((c) => c.name.trim().toLowerCase());
@@ -158,6 +162,7 @@ export function SetupForm({ data }: { data: Data }) {
                 kind: i.kind,
                 expectedAmount: i.kind === "monthly" ? amt : null,
                 defaultAmount: i.kind === "one_off" ? amt : null,
+                dueDay: i.kind === "monthly" && i.dueDay ? Number(i.dueDay) : null,
                 removed: i.removed,
               };
             }),
@@ -312,16 +317,17 @@ export function SetupForm({ data }: { data: Data }) {
                 )}
                 <div className="flex flex-col gap-1.5 border-t border-line-soft pt-2.5">
                   {c.items.length > 0 && (
-                    <div className="grid grid-cols-[minmax(0,1fr)_110px_110px_40px] gap-2.5 text-[11px] font-semibold tracking-wider text-muted-ink uppercase">
+                    <div className={cn(ITEM_GRID, "text-[11px] font-semibold tracking-wider text-muted-ink uppercase")}>
                       <span>Item</span>
                       <span>Kind</span>
+                      <span title="Day of the month a monthly item is due. Optional.">Due day</span>
                       <span className="text-right">Amount</span>
                       <span />
                     </div>
                   )}
                   {c.items.map((i) => (
                     <div key={i.key} className="flex flex-col gap-0.5">
-                    <div className={cn("grid grid-cols-[minmax(0,1fr)_110px_110px_40px] items-center gap-2.5", i.removed && "opacity-50")}>
+                    <div className={cn(ITEM_GRID, "items-center", i.removed && "opacity-50")}>
                       <input
                         aria-label="Item name"
                         autoFocus={!i.id && !i.name}
@@ -340,6 +346,19 @@ export function SetupForm({ data }: { data: Data }) {
                         <option value="one_off">One-off</option>
                         <option value="monthly">Monthly</option>
                       </select>
+                      {i.kind === "monthly" ? (
+                        <input
+                          aria-label={`Due day of the month for ${i.name || "item"} (optional)`}
+                          inputMode="numeric"
+                          placeholder="—"
+                          value={i.dueDay}
+                          disabled={i.removed}
+                          onChange={(e) => updateItem(c.key, i.key, { dueDay: e.target.value.replace(/\D/g, "").slice(0, 2) })}
+                          className={cn(field, "px-1.5 text-center")}
+                        />
+                      ) : (
+                        <span />
+                      )}
                       <input
                         aria-label={`Amount for ${i.name || "item"}`}
                         inputMode="decimal"
@@ -369,7 +388,7 @@ export function SetupForm({ data }: { data: Data }) {
                   <button
                     type="button"
                     onClick={() =>
-                      updateCat(c.key, { items: [...c.items, { key: newKey(), id: null, name: "", kind: "one_off", amount: "", removed: false }] })
+                      updateCat(c.key, { items: [...c.items, { key: newKey(), id: null, name: "", kind: "one_off", amount: "", dueDay: "", removed: false }] })
                     }
                     className="flex min-h-10 items-center gap-1.5 self-start rounded-[10px] px-2.5 text-sm font-semibold text-teal hover:bg-teal-wash"
                   >

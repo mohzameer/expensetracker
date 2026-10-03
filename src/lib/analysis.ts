@@ -1,4 +1,4 @@
-import { addDays, addMonths, diffDays, formatDay, formatMonth, periodEnd, periodOf, periodStart, weekStart, type Range } from "./dates";
+import { addDays, addMonths, diffDays, dueDateIn, formatDay, formatMonth, periodEnd, periodOf, periodStart, weekStart, type Range } from "./dates";
 
 /** One expense, as the Analysis page sees it. */
 export type Row = {
@@ -20,9 +20,14 @@ export type ItemRef = {
   kind: "monthly" | "one_off";
   expectedAmount: number | null;
   defaultAmount: number | null;
+  /** Day of the month a monthly item is due, if it has one. */
+  dueDay: number | null;
   ym: string | null;
   archived: boolean;
+  createdOn: string;
 };
+
+export type CategoryRef = { id: string; name: string; color: string; archived?: boolean };
 
 export type Preset = "month" | "week" | "last_month" | "last_3" | "year" | "custom";
 
@@ -116,6 +121,45 @@ export function monthBuckets(rows: Row[], today: string, startDay: number, n = 1
   return { months, average: finished.length ? Math.round(finished.reduce((a, m) => a + m.total, 0) / finished.length) : null };
 }
 
+type CycleItem = {
+  key: string;
+  categoryId: string;
+  name: string;
+  kind: "monthly" | "one_off";
+  dueDay: number | null;
+  planned: number | null;
+  /** Position in Setup's order. */
+  order: number;
+  /** Worth listing even with nothing spent: planned, still in use, and it existed by then. */
+  listable: boolean;
+};
+
+/**
+ * The items that belong to budget month `ym`, by key: every monthly item plus that
+ * month's one-offs. Planned = a monthly item's expected amount, or the one-off's amount.
+ */
+function cycleItems(items: ItemRef[], categories: CategoryRef[], ym: string, startDay: number): Map<string, CycleItem> {
+  const live = new Set(categories.filter((c) => !c.archived).map((c) => c.id));
+  const end = periodEnd(ym, startDay);
+  const out = new Map<string, CycleItem>();
+  items.forEach((it, order) => {
+    if (it.kind === "one_off" && it.ym !== ym) return;
+    const key = itemKey(it.categoryId, it.name);
+    const amount = it.kind === "monthly" ? it.expectedAmount : it.defaultAmount;
+    const listable = amount != null && !it.archived && live.has(it.categoryId) && (it.kind === "one_off" || it.createdOn < end);
+    const cur = out.get(key);
+    if (cur) {
+      // A monthly item and a one-off with the same name: one line, amounts added.
+      if (amount != null) cur.planned = (cur.planned ?? 0) + amount;
+      cur.listable ||= listable;
+      cur.dueDay ??= it.kind === "monthly" ? it.dueDay : null;
+    } else {
+      out.set(key, { key, categoryId: it.categoryId, name: it.name, kind: it.kind, dueDay: it.kind === "monthly" ? it.dueDay : null, planned: amount, order, listable });
+    }
+  });
+  return out;
+}
+
 export type TopItem = {
   key: string;
   categoryId: string | null;
@@ -130,11 +174,10 @@ export type TopItem = {
 };
 
 /**
- * Items ranked by spend. With `ym` (a single budget month) each gets its planned amount —
- * a monthly item's expected amount, or that month's one-off amount — and items that were
- * planned but not spent on are listed too.
+ * Items ranked by spend. With `ym` (a single budget month) each gets its planned amount,
+ * and items that were planned but not spent on are listed too.
  */
-export function topItems(rows: Row[], items: ItemRef[], categories: { id: string; name: string; color: string }[], ym: string | null): TopItem[] {
+export function topItems(rows: Row[], items: ItemRef[], categories: CategoryRef[], ym: string | null, startDay: number): TopItem[] {
   const out = new Map<string, TopItem>();
   for (const r of rows) {
     const key = rowKey(r);
@@ -155,32 +198,86 @@ export function topItems(rows: Row[], items: ItemRef[], categories: { id: string
   }
   if (ym) {
     const catOf = new Map(categories.map((c) => [c.id, c]));
-    for (const it of items) {
-      const applies = it.kind === "monthly" ? true : it.ym === ym;
-      const amount = it.kind === "monthly" ? it.expectedAmount : it.defaultAmount;
-      if (!applies || amount == null) continue;
-      const key = itemKey(it.categoryId, it.name);
-      const cat = catOf.get(it.categoryId);
-      if (!out.has(key) && (it.archived || !cat)) continue; // gone and unused: nothing to show
-      const cur = out.get(key) ?? {
-        key,
-        categoryId: it.categoryId,
-        categoryName: cat!.name,
-        color: cat!.color,
-        name: it.name,
-        total: 0,
-        count: 0,
-        share: 0,
-        planned: null,
-      };
-      cur.planned = (cur.planned ?? 0) + amount;
-      out.set(key, cur);
+    for (const it of cycleItems(items, categories, ym, startDay).values()) {
+      if (it.planned == null) continue;
+      const spent = out.get(it.key);
+      if (spent) spent.planned = it.planned;
+      else if (it.listable) {
+        const cat = catOf.get(it.categoryId)!;
+        out.set(it.key, { key: it.key, categoryId: it.categoryId, categoryName: cat.name, color: cat.color, name: it.name, total: 0, count: 0, share: 0, planned: it.planned });
+      }
     }
   }
   const list = [...out.values()];
   const total = list.reduce((a, t) => a + t.total, 0);
   for (const t of list) t.share = total ? t.total / total : 0;
   return list.sort((a, b) => b.total - a.total || (b.planned ?? 0) - (a.planned ?? 0) || a.key.localeCompare(b.key));
+}
+
+export type GridItem = {
+  key: string;
+  /** null = spending in the category without an item. */
+  name: string | null;
+  kind: "monthly" | "one_off" | null;
+  dueDate: string | null;
+  /** Distinct days it was paid on, oldest first. */
+  paidOn: string[];
+  planned: number | null;
+  spent: number;
+};
+export type GridCategory = { id: string | null; name: string; color: string; planned: number; spent: number; items: GridItem[] };
+
+/**
+ * One budget month as a table: every item that was planned or spent on, under its category
+ * (in Setup's order), with due date, the days it was paid, planned and spent. Uncategorised
+ * spending comes last.
+ */
+export function cycleGrid(rows: Row[], items: ItemRef[], categories: CategoryRef[], ym: string, startDay: number): { categories: GridCategory[]; planned: number; spent: number } {
+  const range = { from: periodStart(ym, startDay), to: periodEnd(ym, startDay) };
+  const meta = cycleItems(items, categories, ym, startDay);
+  const lines = new Map<string, GridItem & { categoryId: string | null; order: number }>();
+  for (const it of meta.values()) {
+    if (!it.listable) continue;
+    lines.set(it.key, {
+      key: it.key, categoryId: it.categoryId, name: it.name, kind: it.kind, order: it.order,
+      dueDate: it.dueDay ? dueDateIn(range, it.dueDay) : null, paidOn: [], planned: it.planned, spent: 0,
+    });
+  }
+  const seen = new Map<string | null, { name: string; color: string }>();
+  for (const r of rows) {
+    if (!inRange(r.date, range)) continue;
+    seen.set(r.categoryId, { name: r.categoryName ?? "Needs category", color: r.color ?? "var(--faint)" });
+    const key = rowKey(r);
+    const m = meta.get(key);
+    const line = lines.get(key) ?? {
+      key, categoryId: r.categoryId, name: r.itemName, kind: m?.kind ?? null,
+      // Items first (Setup's order), then spending without an item.
+      order: m?.order ?? (r.itemName ? items.length : items.length + 1),
+      dueDate: m?.dueDay ? dueDateIn(range, m.dueDay) : null, paidOn: [], planned: m?.planned ?? null, spent: 0,
+    };
+    line.spent += r.amount;
+    if (!line.paidOn.includes(r.date)) line.paidOn.push(r.date);
+    lines.set(key, line);
+  }
+  const groups: GridCategory[] = [];
+  const order: (CategoryRef | null)[] = [...categories, ...(seen.has(null) ? [null] : [])];
+  for (const c of order) {
+    const id = c?.id ?? null;
+    const list = [...lines.values()]
+      .filter((l) => l.categoryId === id)
+      .sort((a, b) => a.order - b.order || (a.name ?? "").localeCompare(b.name ?? ""))
+      .map((l): GridItem => ({ key: l.key, name: l.name, kind: l.kind, dueDate: l.dueDate, paidOn: [...l.paidOn].sort(), planned: l.planned, spent: l.spent }));
+    if (!list.length) continue;
+    groups.push({
+      id,
+      name: c?.name ?? "Needs category",
+      color: c?.color ?? seen.get(null)?.color ?? "var(--faint)",
+      planned: list.reduce((a, l) => a + (l.planned ?? 0), 0),
+      spent: list.reduce((a, l) => a + l.spent, 0),
+      items: list,
+    });
+  }
+  return { categories: groups, planned: groups.reduce((a, g) => a + g.planned, 0), spent: groups.reduce((a, g) => a + g.spent, 0) };
 }
 
 export type Search = { q: string; categoryId: string | null; accountId: string | null; range: Range };

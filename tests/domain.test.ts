@@ -8,6 +8,7 @@ import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
 import { assignCategory, createExpense, updateExpense } from "@/server/domain/expenses";
 import { addAccountAdjustment, createAccount, deleteAccountAdjustment, getAccounts, setAccountBalance, transferBetweenAccounts } from "@/server/domain/accounts";
 import { createItem, itemsForMonth, removeCategory, saveSetup, setChartHiddenCategories } from "@/server/domain/catalog";
+import { getMonthlyItems } from "@/server/queries";
 import { freshDb, rs, seedSeptember } from "./helpers";
 
 let db: Db;
@@ -364,6 +365,38 @@ describe("income", () => {
     expect((await lines("2026-10")).map((r) => r.source)).toContain("Insurance");
     await expect(undoReceiveIncome(db, com.id)).rejects.toThrow(/closed/);
     await expect(db.delete(incomes).where(eq(incomes.id, com.id))).rejects.toThrow();
+  });
+});
+
+describe("due day on monthly items", () => {
+  const due = async (itemId: string) => (await getMonthlyItems(db, (await getMonth(db, "2026-09"))!)).find((d) => d.itemId === itemId)!.dueDate;
+  const setup = (s: Awaited<ReturnType<typeof seedSeptember>>, dueDay: number | null) =>
+    saveSetup(db, {
+      ym: "2026-09", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
+      categories: [{ id: s.utilities.id, name: "Utilities", color: "#00897B", alertPct: null, removed: false,
+        items: [{ id: s.internet.id, name: "Internet", kind: "monthly", expectedAmount: rs(3990), defaultAmount: null, dueDay, removed: false }] }],
+    });
+
+  it("is optional, can be set and cleared, and dated items come first", async () => {
+    const s = await seedSeptember(db);
+    expect(await due(s.internet.id)).toBeNull();
+    await setup(s, 15);
+    expect(await due(s.internet.id)).toBe("2026-09-15");
+    const list = await getMonthlyItems(db, (await getMonth(db, "2026-09"))!);
+    expect(list[0].itemId).toBe(s.internet.id);
+    await setup(s, null);
+    expect(await due(s.internet.id)).toBeNull();
+    // The cap is untouched either way.
+    expect((await summary("2026-09", s.utilities.id)).allocation).toBe(rs(18000));
+  });
+
+  it("is stored when an item is created, and must be a real day", async () => {
+    const s = await seedSeptember(db);
+    const rent = await createItem(db, { categoryId: s.dining.id, name: "Rent", kind: "monthly", expectedAmount: rs(100), dueDay: 28, ym: "2026-09" });
+    expect(rent.dueDay).toBe(28);
+    // One-offs never carry a due day.
+    expect((await createItem(db, { categoryId: s.dining.id, name: "Gift", kind: "one_off", dueDay: 5, ym: "2026-09" })).dueDay).toBeNull();
+    await expect(createItem(db, { categoryId: s.dining.id, name: "Bad", kind: "monthly", expectedAmount: rs(100), dueDay: 32, ym: "2026-09" })).rejects.toThrow();
   });
 });
 
