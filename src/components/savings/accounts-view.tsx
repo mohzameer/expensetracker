@@ -9,6 +9,7 @@ import {
   createAccountAction,
   moveToCategoryAction,
   addAccountAdjustmentAction,
+  setAccountBalanceAction,
   deleteAccountAdjustmentAction,
   setDefaultAccountAction,
   transferBetweenAccountsAction,
@@ -209,7 +210,10 @@ function AddAccountSheet({ currency, onClose }: { currency: string; onClose: () 
   );
 }
 
-/** The account's + / − adjustments, each with a reason, and a row to add one. */
+/**
+ * The account's adjustments, each with a reason. Two ways to add one:
+ * a + / − amount, or the total the account should show (the app works out the difference).
+ */
 function AdjustmentsSheet({
   account,
   ledger,
@@ -221,18 +225,31 @@ function AdjustmentsSheet({
   currency: string;
   onClose: () => void;
 }) {
+  const [mode, setMode] = useState<"change" | "total">("change");
   const [sign, setSign] = useState<1 | -1>(-1);
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [pending, start] = useTransition();
   const value = parseMoney(amount) ?? 0;
+  // "Set balance to": the typed figure is the new total; the adjustment is the difference.
+  const target = parseMoney(amount);
+  const diff = target == null ? null : target - account.balance;
   const list = ledger.filter((l) => l.accountId === account.id && l.adjustmentId);
+  const signed = (n: number) => `${n > 0 ? "+" : "−"}${formatAmount(Math.abs(n))}`;
 
   const add = () =>
     start(async () => {
-      const res = await addAccountAdjustmentAction({ accountId: account.id, amount: sign * value, reason });
-      if (!res.ok) return void toast.error(res.error);
-      toast.success(`${sign > 0 ? "+" : "−"}${formatAmount(value)} to ${account.name}`);
+      if (mode === "total") {
+        const res = await setAccountBalanceAction({ accountId: account.id, actual: target!, note: reason });
+        if (!res.ok) return void toast.error(res.error);
+        toast.success(
+          res.data.diff === 0 ? `${account.name} already matches` : `${account.name} set to ${formatAmount(target!)} (${signed(res.data.diff)})`,
+        );
+      } else {
+        const res = await addAccountAdjustmentAction({ accountId: account.id, amount: sign * value, reason });
+        if (!res.ok) return void toast.error(res.error);
+        toast.success(`${signed(sign * value)} to ${account.name}`);
+      }
       setAmount("");
       setReason("");
     });
@@ -250,11 +267,53 @@ function AdjustmentsSheet({
       title={`${account.name} adjustments`}
       description={
         <span className="text-muted-ink">
-          Balance {formatMoney(account.balance, currency)}. Add money that came in or went out outside the app, with a reason.
+          Balance {formatMoney(account.balance, currency)}. Add or take off an amount, or set the balance to what the bank shows — each
+          with a reason.
         </span>
       }
     >
       <div className="flex flex-col gap-2.5 rounded-xl border border-line p-3">
+        <div role="tablist" aria-label="How to adjust" className="grid grid-cols-2 gap-1 rounded-xl bg-paper p-1">
+          {(
+            [
+              ["change", "+ / − amount"],
+              ["total", "Set balance to"],
+            ] as const
+          ).map(([m, label]) => (
+            <button
+              key={m}
+              type="button"
+              role="tab"
+              aria-selected={mode === m}
+              onClick={() => {
+                setMode(m);
+                setAmount("");
+              }}
+              className={cn("min-h-10 rounded-[10px] text-sm font-semibold", mode === m ? "bg-surface shadow-sm" : "text-muted-ink")}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {mode === "total" ? (
+          <div className="flex flex-col gap-1">
+            <input
+              aria-label="New balance"
+              inputMode="decimal"
+              placeholder={`What ${account.name} shows now`}
+              className={inputCls}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+            <span className="text-[13px] text-muted-ink">
+              {diff == null
+                ? `The app has ${formatAmount(account.balance)}.`
+                : diff === 0
+                  ? "Already matches — nothing to adjust."
+                  : `That's an adjustment of ${signed(diff)} from ${formatAmount(account.balance)}.`}
+            </span>
+          </div>
+        ) : (
         <div className="flex gap-2">
           <div role="radiogroup" aria-label="Plus or minus" className="grid shrink-0 grid-cols-2 gap-1 rounded-xl bg-paper p-1">
             {([1, -1] as const).map((v) => (
@@ -283,6 +342,7 @@ function AdjustmentsSheet({
             onChange={(e) => setAmount(e.target.value)}
           />
         </div>
+        )}
         <input
           aria-label="Reason"
           placeholder="Reason, e.g. Bank charges, Interest"
@@ -291,8 +351,18 @@ function AdjustmentsSheet({
           maxLength={120}
           onChange={(e) => setReason(e.target.value)}
         />
-        <button disabled={pending || !value || !reason.trim()} className={primary} onClick={add}>
-          {pending ? "Saving…" : `Add ${sign > 0 ? "+" : "−"}${formatMoney(value, currency)}`}
+        <button
+          disabled={pending || !reason.trim() || (mode === "total" ? diff == null || diff === 0 : !value)}
+          className={primary}
+          onClick={add}
+        >
+          {pending
+            ? "Saving…"
+            : mode === "total"
+              ? diff
+                ? `Set to ${formatMoney(target!, currency)} (${signed(diff)})`
+                : "Set balance"
+              : `Add ${sign > 0 ? "+" : "−"}${formatMoney(value, currency)}`}
         </button>
       </div>
 
