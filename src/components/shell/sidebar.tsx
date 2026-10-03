@@ -7,10 +7,10 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", match: "/dashboard" },
-  { href: "/analysis", label: "Analysis", match: "/analysis" },
   { href: "/", label: "Daily entry", match: "/day" },
   { href: "/setup", label: "Setup", match: "/setup" },
   { href: "/savings", label: "Accounts", match: "/savings" },
+  { href: "/analysis", label: "Analysis", match: "/analysis" },
   { href: "/close", label: "Close month", match: "/close" },
 ];
 
