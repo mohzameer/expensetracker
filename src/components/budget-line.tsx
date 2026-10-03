@@ -40,7 +40,7 @@ export function BudgetLine({
     state === "amber"
       ? `After this, ${pctLeft.toFixed(1)}% of ${formatMoney(effectiveAllocation, currency)} remains — below your ${alertPct}% alert.`
       : state === "red"
-        ? `${categoryName} will go negative. You can cover it from another category or Savings.`
+        ? `${categoryName} will go negative. You can cover it from another category or raise its cap.`
         : null;
 
   return (

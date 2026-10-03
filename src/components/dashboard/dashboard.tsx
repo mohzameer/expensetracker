@@ -5,6 +5,7 @@ import { ColumnChart } from "@/components/charts/column-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
 import { ChartFilter } from "@/components/charts/chart-filter";
 import { MoneyBand } from "@/components/income/money-band";
+import { CoverButton } from "@/components/sheets/cover-button";
 import type { getDashboard } from "@/server/queries";
 import { formatMonth } from "@/lib/dates";
 import { formatAmount, formatMoney } from "@/lib/money";
@@ -73,7 +74,28 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
               value={formatMoney(closed ? data.summaries.reduce((a, s) => a + s.swept, 0) : totals.left, currency)}
               valueClass={closed ? undefined : totals.left < 0 ? "text-bad" : "text-ok"}
               sub={
-                negatives.length ? (
+                negatives.length && !closed ? (
+                  // Each overspent category is a button straight into its cover sheet.
+                  <span className="flex flex-col gap-1.5 pt-0.5">
+                    <span className="text-bad">Over their cap:</span>
+                    {negatives.map((n) => (
+                      <CoverButton
+                        key={n.categoryId}
+                        target={n}
+                        summaries={data.summaries}
+                        currency={currency}
+                        ym={data.ym}
+                        className="flex min-h-9 w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-bad-bg px-3 py-1.5 text-left text-[13px] font-semibold text-bad hover:brightness-95"
+                      >
+                        <span className="flex-1">{n.name}</span>
+                        <span className="flex items-center gap-2 whitespace-nowrap">
+                          {formatAmount(n.remaining)}
+                          <span className="rounded-full bg-bad px-2 py-0.5 text-xs text-white">Cover</span>
+                        </span>
+                      </CoverButton>
+                    ))}
+                  </span>
+                ) : negatives.length ? (
                   <span className="text-bad">
                     {negatives.map((n) => `${n.name} ${formatAmount(n.remaining)}`).join(", ")} uncovered
                   </span>
@@ -154,9 +176,21 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
                   <div key={s.categoryId} className="flex flex-col gap-1.5">
                     <div className="flex justify-between gap-2">
                       <span className="font-medium">{s.name}</span>
-                      <span className={cn("font-semibold", TEXT[s.state])}>
-                        {s.remaining < 0 ? `${formatAmount(s.remaining)} · cover` : `${formatAmount(s.remaining)} left`}
-                      </span>
+                      {s.remaining < 0 && !closed ? (
+                        <CoverButton
+                          target={s}
+                          summaries={data.summaries}
+                          currency={currency}
+                          ym={data.ym}
+                          className="-my-1 flex min-h-8 items-center gap-1.5 rounded-full bg-bad-bg px-2.5 text-[13px] font-semibold text-bad hover:brightness-95"
+                        >
+                          {formatAmount(s.remaining)} · Cover
+                        </CoverButton>
+                      ) : (
+                        <span className={cn("font-semibold", TEXT[s.state])}>
+                          {s.remaining < 0 ? `${formatAmount(s.remaining)} over` : `${formatAmount(s.remaining)} left`}
+                        </span>
+                      )}
                     </div>
                     <div
                       role="meter"

@@ -172,6 +172,24 @@ export function DayView({ data }: { data: DayData }) {
           </Link>
         )}
 
+        {/* Overspent categories, always one tap from a fix (not only on days they have entries). */}
+        {!closed &&
+          data.summaries
+            .filter((s) => s.remaining < 0)
+            .map((s) => (
+              <button
+                key={s.categoryId}
+                type="button"
+                onClick={() => openCover(s.categoryId)}
+                className="flex min-h-11 items-center gap-2.5 rounded-xl bg-bad-bg px-3.5 text-left text-bad"
+              >
+                <span className="flex-1 text-[15px] font-medium">
+                  {s.name} is over by {formatMoney(-s.remaining, data.currency)}
+                </span>
+                <span className="rounded-full bg-bad px-3 py-1 text-xs font-semibold text-white">Cover</span>
+              </button>
+            ))}
+
         {data.inboxCount > 0 && (
           <Link href="/inbox" className="flex min-h-11 items-center gap-2.5 rounded-xl border border-line bg-surface px-3.5">
             <span className="flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-ink px-1.5 text-xs font-semibold text-white">
