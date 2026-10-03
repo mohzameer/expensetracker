@@ -72,7 +72,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
   // "Don't deduct": the money already left your account before you set its balance
   // (e.g. rent paid before you entered today's balance). Counts for budgets only.
   const [noDeduct, setNoDeduct] = useState(!!original && original.accountId === null);
-  const [newCategory, setNewCategory] = useState<{ name: string; allocation: string; alertPct: string } | null>(null);
+  const [newCategory, setNewCategory] = useState<{ name: string; alertPct: string } | null>(null);
   const [newItem, setNewItem] = useState<{ name: string; kind: "one_off" | "monthly"; amount: string } | null>(null);
   const [extraCats, setExtraCats] = useState<CatalogCategory[]>([]);
   const [extraItems, setExtraItems] = useState<CatalogItem[]>([]);
@@ -137,7 +137,6 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
     startCreating(async () => {
       const res = await createCategoryAction({
         name: newCategory.name,
-        allocation: parseMoney(newCategory.allocation) ?? null,
         alertPct: newCategory.alertPct ? Number(newCategory.alertPct) : null,
         ym: entryYm,
       });
@@ -228,7 +227,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
               if (!amountTyped) setAmountStr(""); // drop an amount the previous item filled in
             }}
             onCreate={(name) => {
-              setNewCategory({ name, allocation: "", alertPct: "" });
+              setNewCategory({ name, alertPct: "" });
               setNewItem(null);
             }}
             emptyOption={{ label: "No category — sort it out later", hint: <span className="text-xs">Needs category</span> }}
@@ -237,21 +236,17 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
           {newCategory && (
             <div className="flex flex-col gap-3 rounded-[14px] border border-teal bg-teal-wash p-3.5">
               <div className="text-sm font-semibold text-teal-deep">New category</div>
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="nc-name" className={fieldLabel}>Name</label>
-                <input id="nc-name" className={inputBox} value={newCategory.name} onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })} />
-              </div>
               <div className="grid grid-cols-[1fr_96px] gap-2.5">
                 <div className="flex flex-col gap-1.5">
-                  <label htmlFor="nc-alloc" className={fieldLabel}>Budget for {formatMonth(entryYm, { month: "short" })}</label>
-                  <input id="nc-alloc" inputMode="decimal" placeholder="0" className={inputBox} value={newCategory.allocation} onChange={(e) => setNewCategory({ ...newCategory, allocation: e.target.value })} />
+                  <label htmlFor="nc-name" className={fieldLabel}>Name</label>
+                  <input id="nc-name" className={inputBox} value={newCategory.name} onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })} />
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label htmlFor="nc-alert" className={fieldLabel}>Alert at %</label>
                   <input id="nc-alert" inputMode="numeric" placeholder={String(data.defaultAlertPct)} className={inputBox} value={newCategory.alertPct} onChange={(e) => setNewCategory({ ...newCategory, alertPct: e.target.value.replace(/\D/g, "").slice(0, 3) })} />
                 </div>
               </div>
-              <p className="text-[13px] text-muted-ink">This is the category&apos;s hard cap for {formatMonth(entryYm, { month: "long" })} · leave blank to set later.</p>
+              <p className="text-[13px] text-muted-ink">Its cap is the total of the items you add to it.</p>
               <div className="flex gap-2">
                 <button type="button" onClick={() => setNewCategory(null)} className="min-h-11 rounded-xl border border-line-strong bg-surface px-4 text-sm font-medium">Cancel</button>
                 <button type="button" disabled={creating || !newCategory.name.trim()} onClick={createCategory} className="min-h-11 flex-1 rounded-xl bg-teal text-sm font-semibold text-white disabled:opacity-60">
@@ -323,8 +318,11 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
                 ))}
               </div>
               <div className="flex flex-col gap-1.5">
-                <label htmlFor="ni-amount" className={fieldLabel}>{newItem.kind === "monthly" ? "Expected each month" : "Amount (optional)"}</label>
+                <label htmlFor="ni-amount" className={fieldLabel}>{newItem.kind === "monthly" ? "Expected each month" : "Planned amount (optional)"}</label>
                 <input id="ni-amount" inputMode="decimal" className={inputBox} value={newItem.amount} onChange={(e) => setNewItem({ ...newItem, amount: e.target.value })} />
+                <span className="text-xs text-muted-ink">
+                  Adds to {selectedCategory?.name}&apos;s cap{newItem.kind === "monthly" ? " every month" : ` for ${formatMonth(entryYm, { month: "long" })}`}.
+                </span>
               </div>
               <div className="flex gap-2">
                 <button type="button" onClick={() => setNewItem(null)} className="min-h-11 rounded-xl border border-line-strong bg-surface px-4 text-sm font-medium">Cancel</button>

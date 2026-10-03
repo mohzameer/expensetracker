@@ -4,6 +4,7 @@ import { categories, categoryBudgets, categoryMonthSummary, expenses, incomes, m
 import { addDays, addMonths, formatDay, formatMonth, periodEnd, periodOf, periodStart, today, type Range } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { UserError } from "@/lib/errors";
+import { syncCaps } from "./caps";
 
 export type Month = typeof months.$inferSelect;
 
@@ -48,9 +49,9 @@ export async function currentYm(db: Db): Promise<string> {
 }
 
 /**
- * Return the month row, creating it on first write. A new month copies the
- * allocations (not leftovers) and alert % of the latest earlier month, and starts
- * with the default expected income line (e.g. salary) when one is set.
+ * Return the month row, creating it on first write. A new month's caps are the
+ * totals of each category's monthly items (one-offs don't carry over); it copies
+ * the alert % of the latest earlier month.
  */
 export async function ensureMonth(db: Db, ym: string): Promise<Month> {
   const existing = await getMonth(db, ym);
@@ -85,11 +86,11 @@ export async function ensureMonth(db: Db, ym: string): Promise<Month> {
         cats.map((c) => ({
           monthId: month.id,
           categoryId: c.id,
-          allocation: byCat.get(c.id)?.allocation ?? 0,
           alertPct: byCat.get(c.id)?.alertPct ?? null,
         })),
       );
     }
+    await syncCaps(tx);
     if (s.defaultIncomeAmount) {
       await tx.insert(incomes).values({
         monthId: month.id,

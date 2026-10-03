@@ -78,6 +78,13 @@
       "when": 1790853548604,
       "tag": "0010_chart_hidden_categories",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791017407207,
+      "tag": "0011_caps_from_items",
+      "breakpoints": true
     }
   ]
 }

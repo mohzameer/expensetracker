@@ -1,5 +1,5 @@
 /**
- * npm run db:seed        → starter categories, items and this month's caps
+ * npm run db:seed        → starter categories and items (a category's cap is the total of its items)
  * npm run db:seed:demo   → the same plus last month (closed) and sample spending
  */
 import { config } from "dotenv";
@@ -17,18 +17,18 @@ import { createAccount } from "../src/server/domain/accounts";
 const rs = (n: number) => Math.round(n * 100);
 
 const CATALOG = [
-  { name: "Groceries", color: "#00897B", cap: 30000, items: [["Keells", "one_off"], ["Cargills", "one_off"], ["Market", "one_off"]] },
-  { name: "Dining", color: "#E2682F", cap: 12000, items: [["Lunch", "one_off", 1250], ["Coffee", "one_off", 500], ["Dinner out", "one_off"]] },
-  { name: "Transport", color: "#5E52B8", cap: 15000, items: [["PickMe", "one_off"], ["Fuel", "one_off"]] },
-  { name: "Utilities", color: "#DB9E00", cap: 18000, items: [["Electricity", "monthly", 6800], ["Water", "monthly", 1400], ["Internet", "monthly", 3990]] },
-  { name: "Subscriptions", color: "#D35C93", cap: 8000, items: [["Gym", "monthly", 6000], ["Streaming", "monthly", 1200]] },
-  { name: "Health", color: "#2E8B3E", cap: 10000, items: [["Pharmacy", "one_off"], ["Doctor", "one_off"]] },
+  { name: "Groceries", color: "#00897B", items: [["Keells", "monthly", 12000], ["Cargills", "monthly", 10000], ["Market", "monthly", 8000]] },
+  { name: "Dining", color: "#E2682F", items: [["Lunch", "monthly", 6000], ["Coffee", "monthly", 2000], ["Dinner out", "monthly", 4000]] },
+  { name: "Transport", color: "#5E52B8", items: [["PickMe", "monthly", 6000], ["Fuel", "monthly", 9000]] },
+  { name: "Utilities", color: "#DB9E00", items: [["Electricity", "monthly", 6800], ["Water", "monthly", 1400], ["Internet", "monthly", 3990]] },
+  { name: "Subscriptions", color: "#D35C93", items: [["Gym", "monthly", 6000], ["Streaming", "monthly", 1200]] },
+  { name: "Health", color: "#2E8B3E", items: [["Pharmacy", "monthly", 6000], ["Doctor", "one_off", 4000]] },
 ] as const;
 
 async function seedCatalog(db: Db, ym: string) {
   const ids: Record<string, string> = {};
   for (const c of CATALOG) {
-    const cat = await createCategory(db, { name: c.name, color: c.color, allocation: rs(c.cap), ym });
+    const cat = await createCategory(db, { name: c.name, color: c.color, ym });
     ids[c.name] = cat.id;
     for (const [name, kind, amount] of c.items as readonly (readonly [string, "one_off" | "monthly", number?])[]) {
       const item = await createItem(db, {

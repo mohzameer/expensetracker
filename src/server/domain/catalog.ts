@@ -3,12 +3,12 @@ import type { Db } from "@/db/client";
 import { categories, categoryBudgets, expenses, incomes, items, months, settings, transfers } from "@/db/schema";
 import { UserError } from "@/lib/errors";
 import { CATEGORY_COLORS } from "@/lib/palette";
+import { syncCaps } from "./caps";
 import { assertOpen, ensureMonth, lockMonth } from "./months";
 
+export type NewCategory = { name: string; color?: string | null; alertPct?: number | null; ym: string };
 
-export type NewCategory = { name: string; color?: string | null; allocation?: number | null; alertPct?: number | null; ym: string };
-
-/** Create a category (inline from the entry sheet) with this month's cap. */
+/** Create a category (inline from the entry sheet). Its cap comes from the items added to it. */
 export async function createCategory(db: Db, input: NewCategory) {
   return db.transaction(async (tx) => {
     const month = await ensureMonth(tx, input.ym);
@@ -24,12 +24,8 @@ export async function createCategory(db: Db, input: NewCategory) {
         sortOrder: (top ?? -1) + 1,
       })
       .returning();
-    await tx.insert(categoryBudgets).values({
-      monthId: month.id,
-      categoryId: cat.id,
-      allocation: input.allocation ?? 0,
-      alertPct: input.alertPct ?? null,
-    });
+    await tx.insert(categoryBudgets).values({ monthId: month.id, categoryId: cat.id, alertPct: input.alertPct ?? null });
+    await syncCaps(tx, cat.id);
     return cat;
   });
 }
@@ -81,6 +77,7 @@ export async function createItem(db: Db, input: NewItem) {
       sortOrder: (top ?? -1) + 1,
     })
     .returning();
+  await syncCaps(db, input.categoryId); // a new item raises its category's cap
   return item;
 }
 
@@ -136,7 +133,6 @@ export type SetupCategory = {
   id: string | null;
   name: string;
   color: string;
-  allocation: number;
   alertPct: number | null;
   removed: boolean;
   items: SetupItem[];
@@ -212,12 +208,13 @@ export async function saveSetup(db: Db, p: SetupPayload) {
       }
       order++;
 
+      // Only the alert % is set here; the cap itself is derived from the items below.
       await tx
         .insert(categoryBudgets)
-        .values({ monthId: month.id, categoryId, allocation: c.allocation, alertPct: c.alertPct })
+        .values({ monthId: month.id, categoryId, alertPct: c.alertPct })
         .onConflictDoUpdate({
           target: [categoryBudgets.monthId, categoryBudgets.categoryId],
-          set: { allocation: c.allocation, alertPct: c.alertPct },
+          set: { alertPct: c.alertPct },
         });
 
       const removedItems = c.items.filter((i) => i.removed && i.id).map((i) => i.id!);
@@ -240,6 +237,7 @@ export async function saveSetup(db: Db, p: SetupPayload) {
         else await tx.insert(items).values({ ...values, categoryId });
       }
     }
+    await syncCaps(tx); // caps = item totals, for every open month
     return { ok: true };
   });
 }

@@ -161,13 +161,55 @@ describe("monthly items", () => {
   });
 });
 
-describe("new months", () => {
-  it("copy allocations (not leftovers) from the previous month", async () => {
+describe("caps are the total of a category's items", () => {
+  const cap = async (ym: string, categoryId: string) => (await summary(ym, categoryId)).allocation;
+
+  it("a new month starts at the sum of the monthly items, not last month's leftovers", async () => {
     const s = await seedSeptember(db);
     await s.expense(s.groceries.id, rs(5000));
     await ensureMonth(db, "2026-10");
-    expect((await summary("2026-10", s.groceries.id)).allocation).toBe(rs(30000));
+    expect(await cap("2026-10", s.utilities.id)).toBe(rs(3990 + 14010));
     expect((await summary("2026-10", s.groceries.id)).remaining).toBe(rs(30000));
+  });
+
+  it("a one-off raises the cap of its own month only", async () => {
+    const s = await seedSeptember(db);
+    await ensureMonth(db, "2026-10");
+    await createItem(db, { categoryId: s.groceries.id, name: "Dress", kind: "one_off", defaultAmount: rs(4500), ym: "2026-09" });
+    await createItem(db, { categoryId: s.groceries.id, name: "Gift", kind: "one_off", ym: "2026-09" }); // no planned amount → adds nothing
+    expect(await cap("2026-09", s.groceries.id)).toBe(rs(34500));
+    expect(await cap("2026-10", s.groceries.id)).toBe(rs(30000));
+    // A month created later doesn't pick it up either.
+    await ensureMonth(db, "2026-11");
+    expect(await cap("2026-11", s.groceries.id)).toBe(rs(30000));
+  });
+
+  it("changing a monthly amount moves the cap in open months and leaves closed ones alone", async () => {
+    const s = await seedSeptember(db);
+    await closeMonth(db, "2026-09", "2026-10-01");
+    await ensureMonth(db, "2026-10");
+    await ensureMonth(db, "2026-11");
+    await saveSetup(db, {
+      ym: "2026-10", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
+      categories: [{ id: s.utilities.id, name: "Utilities", color: "#00897B", alertPct: null, removed: false,
+        items: [{ id: s.internet.id, name: "Internet", kind: "monthly", expectedAmount: rs(21000), defaultAmount: null, removed: false }] }],
+    });
+    expect(await cap("2026-09", s.utilities.id)).toBe(rs(18000));
+    expect(await cap("2026-10", s.utilities.id)).toBe(rs(21000 + 14010));
+    expect(await cap("2026-11", s.utilities.id)).toBe(rs(21000 + 14010));
+  });
+
+  it("removing an item lowers the cap, and a cover sits on top of it", async () => {
+    const s = await seedSeptember(db);
+    await moveToCategory(db, { ym: "2026-09", toCategoryId: s.utilities.id, source: { kind: "savings" }, amount: rs(1000), reason: "cover", todayStr: "2026-09-10" });
+    await saveSetup(db, {
+      ym: "2026-09", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
+      categories: [{ id: s.utilities.id, name: "Utilities", color: "#00897B", alertPct: null, removed: false,
+        items: [{ id: s.power.id, name: "Power", kind: "monthly", expectedAmount: rs(14010), defaultAmount: null, removed: true }] }],
+    });
+    const u = await summary("2026-09", s.utilities.id);
+    expect(u.allocation).toBe(rs(3990));
+    expect(u.effectiveAllocation).toBe(rs(4990));
   });
 });
 
@@ -240,19 +282,20 @@ describe("setup", () => {
       currencyCode: "LKR",
       categories: [
         {
-          id: s.groceries.id, name: "Food", color: "#1F5F5B", allocation: rs(25000), alertPct: 20, removed: false,
+          id: s.groceries.id, name: "Food", color: "#1F5F5B", alertPct: 20, removed: false,
           items: [{ id: extra.id, name: "Keells", kind: "one_off", expectedAmount: null, defaultAmount: rs(2500), removed: false }],
         },
-        { id: s.dining.id, name: "Dining", color: "#E08A3C", allocation: rs(12000), alertPct: null, removed: true, items: [] },
+        { id: s.dining.id, name: "Dining", color: "#E08A3C", alertPct: null, removed: true, items: [] },
         {
-          id: null, name: "Pharmacy", color: "#7A6FB0", allocation: rs(4000), alertPct: null, removed: false,
+          id: null, name: "Pharmacy", color: "#7A6FB0", alertPct: null, removed: false,
           items: [{ id: null, name: "Meds", kind: "monthly", expectedAmount: rs(1500), defaultAmount: null, removed: false }],
         },
       ],
     });
 
     const food = await summary("2026-09", s.groceries.id);
-    expect(food).toMatchObject({ name: "Food", allocation: rs(25000), alertPct: 20 });
+    // Cap = its monthly item (30,000) + the one-off's planned amount.
+    expect(food).toMatchObject({ name: "Food", allocation: rs(32500), alertPct: 20 });
     // Dining had spending → archived, still visible with its history.
     const dining = await summary("2026-09", s.dining.id);
     expect(dining.archivedAt).not.toBeNull();
@@ -324,26 +367,6 @@ describe("income", () => {
   });
 });
 
-describe("monthly items and caps", () => {
-  it("are not due in a month where their category has no cap", async () => {
-    const s = await seedSeptember(db);
-    const due = async () => {
-      const m = (await getMonth(db, "2026-09"))!;
-      return (await db.select().from(monthlyItemStatus).where(eq(monthlyItemStatus.monthId, m.id))).map((r) => r.name);
-    };
-    expect(await due()).toContain("Internet");
-    await saveSetup(db, {
-      ym: "2026-09", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
-      categories: [{ id: s.utilities.id, name: "Utilities", color: "#00897B", allocation: 0, alertPct: null, removed: false,
-        items: [{ id: s.internet.id, name: "Internet", kind: "monthly", expectedAmount: rs(3990), defaultAmount: null, removed: false }] }],
-    });
-    expect(await due()).not.toContain("Internet");
-    // Paying it anyway brings it back, so the payment is never hidden.
-    await s.expense(s.utilities.id, rs(100), "2026-09-12", s.internet.id);
-    expect(await due()).toContain("Internet");
-  });
-});
-
 describe("items across months", () => {
   it("monthly items carry into every month; one-offs stay in the month they were added for", async () => {
     const s = await seedSeptember(db);
@@ -352,13 +375,12 @@ describe("items across months", () => {
     const oct = await ensureMonth(db, "2026-10");
     const names = async (monthId: string) => (await itemsForMonth(db, monthId)).map((i) => i.name).sort();
 
-    expect(await names(sep.id)).toEqual(["Dress", "Internet"]);
-    expect(await names(oct.id)).toEqual(["Internet"]);
-    // Categories and caps still carry over.
-    expect((await summary("2026-10", s.groceries.id)).allocation).toBe(rs(30000));
+    const carried = ["Internet", "Meals", "Power", "Shop"];
+    expect(await names(sep.id)).toEqual(["Dress", ...carried]);
+    expect(await names(oct.id)).toEqual(carried);
     // The same one-off name can be used again in a later month.
     await createItem(db, { categoryId: s.groceries.id, name: "Dress", kind: "one_off", ym: "2026-10" });
-    expect(await names(oct.id)).toEqual(["Dress", "Internet"]);
+    expect(await names(oct.id)).toEqual(["Dress", ...carried]);
   });
 
   it("switching an item to monthly in Setup makes it carry over", async () => {
@@ -366,7 +388,7 @@ describe("items across months", () => {
     const pads = await createItem(db, { categoryId: s.groceries.id, name: "Pads", kind: "one_off", ym: "2026-09" });
     await saveSetup(db, {
       ym: "2026-09", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
-      categories: [{ id: s.groceries.id, name: "Groceries", color: "#00897B", allocation: rs(30000), alertPct: null, removed: false,
+      categories: [{ id: s.groceries.id, name: "Groceries", color: "#00897B", alertPct: null, removed: false,
         items: [{ id: pads.id, name: "Pads", kind: "monthly", expectedAmount: rs(10000), defaultAmount: null, removed: false }] }],
     });
     const oct = await ensureMonth(db, "2026-10");

@@ -19,7 +19,6 @@ type CatState = {
   id: string | null;
   name: string;
   color: string;
-  allocation: string;
   alertPct: string;
   removed: boolean;
   items: ItemState[];
@@ -45,7 +44,6 @@ function initialState(data: Data): CatState[] {
     id: c.id,
     name: c.name,
     color: c.color,
-    allocation: toInputValue(c.allocation),
     alertPct: c.alertPct == null ? "" : String(c.alertPct),
     removed: false,
     items: c.items.map((i) => ({
@@ -102,38 +100,35 @@ export function SetupForm({ data }: { data: Data }) {
     );
 
   const live = cats.filter((c) => !c.removed);
-  const monthlyCommit = (c: CatState) =>
-    c.items.filter((i) => !i.removed && i.kind === "monthly").reduce((a, i) => a + (parseMoney(i.amount) ?? 0), 0);
+  const sumOf = (c: CatState, kind: Kind) =>
+    c.items.filter((i) => !i.removed && i.kind === kind).reduce((a, i) => a + (parseMoney(i.amount) ?? 0), 0);
+  // A cap is never typed: it is the total of the category's items. Closed months show the cap they closed with.
+  const storedCaps = useMemo(() => new Map(data.categories.map((c) => [c.id, c.cap])), [data]);
+  const capOf = (c: CatState) =>
+    closed && c.id ? (storedCaps.get(c.id) ?? 0) : sumOf(c, "monthly") + sumOf(c, "one_off");
   const totals = {
     categories: live.length,
     items: live.reduce((a, c) => a + c.items.filter((i) => !i.removed).length, 0),
-    monthly: live.reduce((a, c) => a + monthlyCommit(c), 0),
-    allocated: live.reduce((a, c) => a + (parseMoney(c.allocation) ?? 0), 0),
+    monthly: live.reduce((a, c) => a + sumOf(c, "monthly"), 0),
+    allocated: live.reduce((a, c) => a + capOf(c), 0),
   };
-  // Live version of the dashboard's "free after the month" while you edit caps.
+  // Live version of the dashboard's "free after the month" while you edit items.
   const pb = data.planBase;
   const freeAfter = !pb
     ? null
     : pb.kind === "current"
       ? pb.base -
-        live.reduce((a, c) => a + Math.max((parseMoney(c.allocation) ?? 0) + (c.id ? (pb.deltas[c.id] ?? 0) : 0), 0), 0)
+        live.reduce((a, c) => a + Math.max(capOf(c) + (c.id ? (pb.deltas[c.id] ?? 0) : 0), 0), 0)
       : pb.base - totals.allocated;
-
-  const copyCaps = () => {
-    const prev = data.prevAllocations;
-    if (!Object.keys(prev).length) return void toast.error(`No caps set for ${formatMonth(data.prevYm, { month: "long" })}.`);
-    setCats((cs) => cs.map((c) => (c.id && prev[c.id] !== undefined ? { ...c, allocation: toInputValue(prev[c.id]) } : c)));
-    toast(`Copied caps from ${formatMonth(data.prevYm, { month: "long" })}`);
-  };
 
   const save = () => {
     // Validate here for friendly messages; the server validates again.
     for (const c of live) {
       if (!c.name.trim()) return void toast.error("Every category needs a name.");
-      if (c.allocation && parseMoney(c.allocation) == null) return void toast.error(`${c.name}: the cap isn't a valid amount.`);
       for (const i of c.items.filter((x) => !x.removed)) {
         if (!i.name.trim()) return void toast.error(`${c.name}: every item needs a name.`);
         if (i.kind === "monthly" && !parseMoney(i.amount)) return void toast.error(`${i.name}: monthly items need an expected amount.`);
+        if (i.amount && parseMoney(i.amount) == null) return void toast.error(`${i.name}: the amount isn't valid.`);
       }
     }
     const names = live.map((c) => c.name.trim().toLowerCase());
@@ -153,7 +148,6 @@ export function SetupForm({ data }: { data: Data }) {
             id: c.id,
             name: c.name,
             color: c.color,
-            allocation: parseMoney(c.allocation) ?? 0,
             alertPct: c.alertPct === "" ? null : Number(c.alertPct),
             removed: c.removed,
             items: c.items.map((i) => {
@@ -181,7 +175,7 @@ export function SetupForm({ data }: { data: Data }) {
           <MonthHeader ym={data.ym} range={data.range} href={(ym) => `/setup?month=${ym}`} title={`Setup · ${formatMonth(data.ym)}`} />
           <span className="text-sm text-muted-ink">
             Everything on one page. Categories and monthly items carry into every month; one-off items are for {monthName} only.
-            Caps and alert % apply to {monthName}.
+            A category&apos;s cap is the total of its items.
           </span>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -231,14 +225,6 @@ export function SetupForm({ data }: { data: Data }) {
               </select>
             </div>
           )}
-          <button
-            type="button"
-            disabled={readOnly}
-            onClick={copyCaps}
-            className="min-h-10 rounded-[10px] border border-teal bg-surface px-3.5 text-sm font-semibold text-teal disabled:opacity-50"
-          >
-            Copy caps from {formatMonth(data.prevYm, { month: "long" })}
-          </button>
         </div>
       </div>
 
@@ -255,8 +241,9 @@ export function SetupForm({ data }: { data: Data }) {
         <fieldset disabled={readOnly || pending} className="m-0 grid min-w-0 items-start gap-4 border-0 p-0 xl:grid-cols-2">
           <legend className="sr-only">Categories</legend>
           {cats.map((c) => {
-            const commit = monthlyCommit(c);
-            const cap = parseMoney(c.allocation) ?? 0;
+            const monthly = sumOf(c, "monthly");
+            const oneOff = sumOf(c, "one_off");
+            const cap = capOf(c);
             if (c.removed) {
               return (
                 <section key={c.key} className="flex items-center gap-3 rounded-2xl border border-dashed border-line-strong px-5 py-4 text-sm text-muted-ink">
@@ -287,8 +274,13 @@ export function SetupForm({ data }: { data: Data }) {
                     <input id={`${c.key}-n`} autoFocus={!c.id && !c.name} value={c.name} onChange={(e) => updateCat(c.key, { name: e.target.value })} className={field} />
                   </div>
                   <div className="flex min-w-0 flex-col gap-1">
-                    <label htmlFor={`${c.key}-a`} className={cn(label, "truncate")}>{formatMonth(data.ym, { month: "short" })} cap ({symbol})</label>
-                    <input id={`${c.key}-a`} inputMode="decimal" placeholder="0" value={c.allocation} onChange={(e) => updateCat(c.key, { allocation: e.target.value })} className={cn(field, "text-right")} />
+                    <span className={cn(label, "truncate")}>{formatMonth(data.ym, { month: "short" })} cap ({symbol})</span>
+                    <output
+                      aria-label={`${c.name || "Category"} cap, the total of its items`}
+                      className="flex min-h-10 items-center justify-end rounded-[10px] bg-paper px-2.5 text-[15px] font-semibold"
+                    >
+                      {formatAmount(cap)}
+                    </output>
                   </div>
                   <div className="flex flex-col gap-1">
                     <label htmlFor={`${c.key}-p`} className={label}>Alert %</label>
@@ -311,10 +303,11 @@ export function SetupForm({ data }: { data: Data }) {
                     <Archive aria-hidden className="size-4" />
                   </button>
                 </div>
-                {commit > 0 && (
-                  <div className={cn("text-[13px]", commit > cap ? "font-semibold text-warn" : "text-muted-ink")}>
-                    Monthly items commit {formatMoney(commit, symbol)} of this cap
-                    {commit > cap ? ` — ${formatMoney(commit - cap, symbol)} more than the cap` : ""}
+                {!closed && (
+                  <div className="text-[13px] text-muted-ink">
+                    {monthly + oneOff === 0
+                      ? "No cap yet — add items with amounts."
+                      : `Cap = monthly ${formatAmount(monthly)}${oneOff > 0 ? ` + one-off ${formatAmount(oneOff)}` : ""}`}
                   </div>
                 )}
                 <div className="flex flex-col gap-1.5 border-t border-line-soft pt-2.5">
@@ -350,7 +343,7 @@ export function SetupForm({ data }: { data: Data }) {
                       <input
                         aria-label={`Amount for ${i.name || "item"}`}
                         inputMode="decimal"
-                        placeholder={i.kind === "monthly" ? "Required" : "—"}
+                        placeholder={i.kind === "monthly" ? "Required" : "Planned"}
                         value={i.amount}
                         disabled={i.removed}
                         onChange={(e) => updateItem(c.key, i.key, { amount: e.target.value })}
@@ -396,7 +389,6 @@ export function SetupForm({ data }: { data: Data }) {
                   id: null,
                   name: "",
                   color: CATEGORY_COLORS[cs.length % CATEGORY_COLORS.length],
-                  allocation: "",
                   alertPct: "",
                   removed: false,
                   items: [],

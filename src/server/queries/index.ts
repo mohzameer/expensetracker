@@ -49,7 +49,7 @@ export type MonthInfo = { yearMonth: string; status: "open" | "closed"; defaultA
 const monthInfo = (m: Month | null): MonthInfo =>
   m ? { yearMonth: m.yearMonth, status: m.status, defaultAlertPct: m.defaultAlertPct } : null;
 
-/** Create the current month on first visit so allocations roll over by themselves. */
+/** Create the current month on first visit so categories and monthly items roll over by themselves. */
 export async function touchCurrentMonth(db: Db) {
   await ensureMonth(db, await currentYm(db));
 }
@@ -389,7 +389,7 @@ export async function getDashboard(db: Db, ym: string) {
 /** Accounts page: balances, free money, and every movement in or out of an account. */
 export async function getMoneyPage(db: Db) {
   const cur = await currentYm(db);
-  const [settings, accountList, free, committed, entries, incomeIn, spendDays, catalog] = await Promise.all([
+  const [settings, accountList, free, committed, entries, incomeIn, spendDays] = await Promise.all([
     getSettings(db),
     getAccounts(db),
     getSavingsBalance(db, cur),
@@ -409,7 +409,6 @@ export async function getMoneyPage(db: Db) {
       .from(expenses)
       .where(and(isNotNull(expenses.accountId), gte(expenses.spentOn, (await rangeOf(db, addMonths(cur, -2))).from)))
       .groupBy(expenses.accountId, expenses.spentOn),
-    getCatalog(db),
   ]);
 
   const KIND = { opening: "Opening balance", adjustment: "Adjustment", transfer: "Transfer" } as const;
@@ -443,7 +442,6 @@ export async function getMoneyPage(db: Db) {
     free,
     leftToSpend: committed.reduce((a, r) => a + Math.max(r.remaining, 0), 0),
     ledger,
-    categories: catalog.categories,
   };
 }
 
@@ -535,13 +533,11 @@ export async function getSetupPage(db: Db, ym: string) {
   const cur = await currentYm(db);
   const month = ym >= cur ? await ensureMonth(db, ym) : await getMonth(db, ym);
   const prevYm = addMonths(ym, -1);
-  const prev = await getMonth(db, prevYm);
-  const [plan, settings, catalog, budgets, prevBudgets, accountList] = await Promise.all([
+  const [plan, settings, catalog, budgets, accountList] = await Promise.all([
     getMonthPlan(db, ym),
     getSettings(db),
     getCatalog(db, month),
     month ? db.select().from(categoryBudgets).where(eq(categoryBudgets.monthId, month.id)) : [],
-    prev ? db.select().from(categoryBudgets).where(eq(categoryBudgets.monthId, prev.id)) : [],
     getAccounts(db),
   ]);
   const byCat = new Map(budgets.map((b) => [b.categoryId, b]));
@@ -566,13 +562,12 @@ export async function getSetupPage(db: Db, ym: string) {
     planBase,
     accounts: accountList,
     defaultAccountId: settings.defaultAccountId,
-    prevAllocations: Object.fromEntries(prevBudgets.map((b) => [b.categoryId, b.allocation])) as Record<string, number>,
     prevSpentByItem: Object.fromEntries(prevItemSpend.filter((r) => r.total > 0).map((r) => [r.itemId!, r.total])) as Record<string, number>,
     categories: catalog.categories.map((c) => ({
       id: c.id,
       name: c.name,
       color: c.color,
-      allocation: byCat.get(c.id)?.allocation ?? 0,
+      cap: byCat.get(c.id)?.allocation ?? 0, // derived from the items; shown as stored for closed months
       alertPct: byCat.get(c.id)?.alertPct ?? null,
       items: catalog.items
         .filter((i) => i.categoryId === c.id)

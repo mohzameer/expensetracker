@@ -7,7 +7,6 @@ import { ArrowLeftRight, BarChart3, Pencil, Plus, X } from "lucide-react";
 import { Sheet } from "@/components/sheets/sheet";
 import {
   createAccountAction,
-  moveToCategoryAction,
   addAccountAdjustmentAction,
   setAccountBalanceAction,
   deleteAccountAdjustmentAction,
@@ -21,7 +20,7 @@ import { cn } from "@/lib/utils";
 
 type Data = Awaited<ReturnType<typeof getMoneyPage>>;
 type Account = Data["accounts"][number];
-type Open = { kind: "add" } | { kind: "balance"; account: Account } | { kind: "transfer"; fromId?: string } | { kind: "topup" } | null;
+type Open = { kind: "add" } | { kind: "balance"; account: Account } | { kind: "transfer"; fromId?: string } | null;
 
 export function AccountsView({ data }: { data: Data }) {
   const [open, setOpen] = useState<Open>(null);
@@ -107,9 +106,6 @@ export function AccountsView({ data }: { data: Data }) {
             <Link href="/charts?from=/savings" className="flex min-h-10 items-center gap-1.5 rounded-[10px] border border-line-strong px-3.5 text-sm font-medium">
               <BarChart3 aria-hidden className="size-4" /> Spending charts
             </Link>
-            <button onClick={() => show({ kind: "topup" })} className="min-h-10 rounded-[10px] border border-line-strong px-3.5 text-sm font-medium">
-              Top up a budget
-            </button>
           </div>
         </div>
         {data.accounts.length > 1 && (
@@ -169,7 +165,6 @@ export function AccountsView({ data }: { data: Data }) {
         />
       )}
       {open?.kind === "transfer" && <TransferSheet key={key} data={data} fromId={open.fromId} onClose={() => setOpen(null)} />}
-      {open?.kind === "topup" && <TopUpSheet key={key} data={data} onClose={() => setOpen(null)} />}
     </div>
   );
 }
@@ -437,47 +432,6 @@ function TransferSheet({ data, fromId, onClose }: { data: Data; fromId?: string;
         }
       >
         {pending ? "Moving…" : `Move ${formatMoney(value, data.currency)}`}
-      </button>
-    </Sheet>
-  );
-}
-
-/** Raise a budget's cap for this month out of what's left as savings. */
-function TopUpSheet({ data, onClose }: { data: Data; onClose: () => void }) {
-  const [categoryId, setCategoryId] = useState(data.categories[0]?.id ?? "");
-  const [amount, setAmount] = useState("");
-  const [pending, start] = useTransition();
-  const value = parseMoney(amount) ?? 0;
-  return (
-    <Sheet
-      open
-      onOpenChange={(o) => !o && onClose()}
-      title="Top up a budget"
-      description={<span className="text-muted-ink">Raises this month&apos;s cap out of your savings. No money moves between accounts.</span>}
-    >
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="tu-cat" className={labelCls}>Category</label>
-        <select id="tu-cat" className={inputCls} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-          {data.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="tu-amt" className={labelCls}>Amount · {formatMoney(Math.max(data.free, 0), data.currency)} left as savings</label>
-        <input id="tu-amt" inputMode="decimal" className={inputCls} value={amount} onChange={(e) => setAmount(e.target.value)} />
-      </div>
-      <button
-        disabled={pending || !value || value > data.free}
-        className={primary}
-        onClick={() =>
-          start(async () => {
-            const res = await moveToCategoryAction({ ym: data.ym, toCategoryId: categoryId, source: { kind: "savings" }, amount: value, reason: "manual" });
-            if (!res.ok) return void toast.error(res.error);
-            toast.success(`Added ${formatMoney(value, data.currency)} to ${data.categories.find((c) => c.id === categoryId)?.name}`);
-            onClose();
-          })
-        }
-      >
-        {pending ? "Saving…" : `Add ${formatMoney(value, data.currency)}`}
       </button>
     </Sheet>
   );

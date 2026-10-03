@@ -35,7 +35,6 @@ export const accountTransferInput = z.object({ fromId: id, toId: id, amount, not
 
 export const newCategoryInput = z.object({
   name,
-  allocation: z.number().int().min(0).max(1e13).nullable(),
   alertPct: alertPct.nullable(),
   ym: yearMonth,
 });
@@ -90,7 +89,6 @@ export const setupInput = z.object({
       id: id.nullable(),
       name,
       color,
-      allocation: z.number().int().min(0).max(1e13),
       alertPct: alertPct.nullable(),
       removed: z.boolean(),
       items: z.array(setupItem),
