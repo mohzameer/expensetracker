@@ -545,6 +545,13 @@ export async function getSetupPage(db: Db, ym: string) {
     getAccounts(db),
   ]);
   const byCat = new Map(budgets.map((b) => [b.categoryId, b]));
+  // What each item cost in the previous month, to help set this month's amounts.
+  const prevRange = await rangeOf(db, prevYm);
+  const prevItemSpend = await db
+    .select({ itemId: expenses.itemId, total: sum(expenses.amount).mapWith(Number) })
+    .from(expenses)
+    .where(and(isNotNull(expenses.itemId), gte(expenses.spentOn, prevRange.from), lt(expenses.spentOn, prevRange.to)))
+    .groupBy(expenses.itemId);
   const planBase = await getSetupPlanBase(db, ym, plan, catalog.categories.map((c) => c.id));
   return {
     ym,
@@ -560,6 +567,7 @@ export async function getSetupPage(db: Db, ym: string) {
     accounts: accountList,
     defaultAccountId: settings.defaultAccountId,
     prevAllocations: Object.fromEntries(prevBudgets.map((b) => [b.categoryId, b.allocation])) as Record<string, number>,
+    prevSpentByItem: Object.fromEntries(prevItemSpend.filter((r) => r.total > 0).map((r) => [r.itemId!, r.total])) as Record<string, number>,
     categories: catalog.categories.map((c) => ({
       id: c.id,
       name: c.name,

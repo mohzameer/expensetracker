@@ -7,7 +7,7 @@ import { MonthHeader } from "@/components/page-header";
 import { saveSetupAction } from "@/server/actions";
 import type { getSetupPage } from "@/server/queries";
 import { formatMonth } from "@/lib/dates";
-import { formatMoney, parseMoney, toInputValue } from "@/lib/money";
+import { formatAmount, formatMoney, parseMoney, toInputValue } from "@/lib/money";
 import { CATEGORY_COLORS } from "@/lib/palette";
 import { cn } from "@/lib/utils";
 
@@ -327,7 +327,8 @@ export function SetupForm({ data }: { data: Data }) {
                     </div>
                   )}
                   {c.items.map((i) => (
-                    <div key={i.key} className={cn("grid grid-cols-[minmax(0,1fr)_110px_110px_40px] items-center gap-2.5", i.removed && "opacity-50")}>
+                    <div key={i.key} className="flex flex-col gap-0.5">
+                    <div className={cn("grid grid-cols-[minmax(0,1fr)_110px_110px_40px] items-center gap-2.5", i.removed && "opacity-50")}>
                       <input
                         aria-label="Item name"
                         autoFocus={!i.id && !i.name}
@@ -363,6 +364,13 @@ export function SetupForm({ data }: { data: Data }) {
                       >
                         {i.removed ? <Undo2 className="size-4" /> : <X className="size-4" />}
                       </button>
+                    </div>
+                    {/* Last month's actual spend on this item; hidden when there was none. */}
+                    {i.id && data.prevSpentByItem[i.id] ? (
+                      <span className="pl-2.5 text-xs text-muted-ink">
+                        {formatMonth(data.prevYm, { month: "long" })}: spent {formatAmount(data.prevSpentByItem[i.id])}
+                      </span>
+                    ) : null}
                     </div>
                   ))}
                   <button
