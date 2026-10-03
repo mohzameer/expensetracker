@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Archive, Lock, Plus, Undo2, X } from "lucide-react";
+import { Archive, CalendarOff, Lock, Plus, Undo2, X } from "lucide-react";
 import { MonthHeader } from "@/components/page-header";
 import { saveSetupAction } from "@/server/actions";
 import type { getSetupPage } from "@/server/queries";
@@ -60,8 +60,8 @@ function initialState(data: Data): CatState[] {
 
 const field = "min-h-10 w-full rounded-[10px] border border-line-strong bg-surface px-2.5 text-[15px] outline-none focus:border-teal disabled:bg-paper";
 const label = "text-xs font-semibold text-muted-ink";
-/** Item rows: name · kind · skip this month · amount · remove. */
-const ITEM_GRID = "grid grid-cols-[minmax(0,1fr)_100px_72px_100px_40px] gap-2";
+/** Item rows: name · kind · amount · actions (skip this month, remove). */
+const ITEM_GRID = "grid grid-cols-[minmax(0,1fr)_110px_110px_84px] gap-2";
 
 export function SetupForm({ data }: { data: Data }) {
   const initial = useMemo(() => initialState(data), [data]);
@@ -325,50 +325,31 @@ export function SetupForm({ data }: { data: Data }) {
                     <div className={cn(ITEM_GRID, "text-[11px] font-semibold tracking-wider text-muted-ink uppercase")}>
                       <span>Item</span>
                       <span>Kind</span>
-                      <span title={`Leave a monthly item out of ${monthName} only: no cap, not due. It is back next month.`}>{formatMonth(data.ym, { month: "short" })}</span>
                       <span className="text-right">Amount</span>
                       <span />
                     </div>
                   )}
                   {c.items.map((i) => (
                     <div key={i.key} className="flex flex-col gap-0.5">
-                    <div className={cn(ITEM_GRID, "items-center", i.removed && "opacity-50")}>
+                    <div className={cn(ITEM_GRID, "items-center")}>
                       <input
                         aria-label="Item name"
                         autoFocus={!i.id && !i.name}
                         value={i.name}
                         disabled={i.removed}
                         onChange={(e) => updateItem(c.key, i.key, { name: e.target.value })}
-                        className={cn(field, i.removed && "line-through")}
+                        className={cn(field, i.removed && "line-through opacity-50")}
                       />
                       <select
                         aria-label={`Kind of ${i.name || "item"}`}
                         value={i.kind}
                         disabled={i.removed}
                         onChange={(e) => updateItem(c.key, i.key, { kind: e.target.value as Kind })}
-                        className={field}
+                        className={cn(field, i.removed && "opacity-50")}
                       >
                         <option value="one_off">One-off</option>
                         <option value="monthly">Monthly</option>
                       </select>
-                      {i.kind === "monthly" ? (
-                        <button
-                          type="button"
-                          aria-pressed={i.skipped}
-                          aria-label={`Skip ${i.name || "item"} for ${monthName}`}
-                          title={i.skipped ? `Left out of ${monthName}. Click to include it again.` : `Leave out of ${monthName} only`}
-                          disabled={i.removed}
-                          onClick={() => updateItem(c.key, i.key, { skipped: !i.skipped })}
-                          className={cn(
-                            "min-h-10 rounded-[10px] border text-[13px] font-semibold",
-                            i.skipped ? "border-warn-bar bg-warn-bg text-warn" : "border-line text-muted-ink hover:border-line-strong",
-                          )}
-                        >
-                          {i.skipped ? "Skipped" : "Skip"}
-                        </button>
-                      ) : (
-                        <span />
-                      )}
                       <input
                         aria-label={`Amount for ${i.name || "item"}`}
                         inputMode="decimal"
@@ -376,17 +357,55 @@ export function SetupForm({ data }: { data: Data }) {
                         value={i.amount}
                         disabled={i.removed}
                         onChange={(e) => updateItem(c.key, i.key, { amount: e.target.value })}
-                        className={cn(field, "text-right", i.kind === "monthly" && !parseMoney(i.amount) && !i.removed && "border-warn-bar", i.kind === "monthly" && i.skipped && "text-faint line-through")}
+                        className={cn(field, "text-right", i.kind === "monthly" && !parseMoney(i.amount) && !i.removed && "border-warn-bar", i.kind === "monthly" && i.skipped && !i.removed && "text-faint line-through", i.removed && "opacity-50")}
                       />
-                      <button
-                        type="button"
-                        aria-label={i.removed ? `Restore ${i.name}` : `Remove ${i.name}`}
-                        onClick={() => removeItem(c.key, i)}
-                        className="flex size-10 items-center justify-center rounded-[10px] text-muted-ink hover:bg-paper"
-                      >
-                        {i.removed ? <Undo2 className="size-4" /> : <X className="size-4" />}
-                      </button>
+                      <div className="flex items-center justify-end gap-1">
+                        {/* Monthly items can sit out one month instead of being removed for good. */}
+                        {i.kind === "monthly" && (
+                          <button
+                            type="button"
+                            aria-pressed={i.skipped && !i.removed}
+                            aria-label={
+                              i.removed
+                                ? `Skip ${i.name || "item"} for ${monthName} only instead of removing it`
+                                : i.skipped
+                                  ? `Include ${i.name || "item"} in ${monthName} again`
+                                  : `Skip ${i.name || "item"} for ${monthName} only`
+                            }
+                            title={
+                              i.removed
+                                ? `Skip ${monthName} only instead of removing`
+                                : i.skipped
+                                  ? `Skipped for ${monthName}. Click to include it again.`
+                                  : `Skip ${monthName} only (no cap, not due; back next month)`
+                            }
+                            onClick={() => updateItem(c.key, i.key, i.removed ? { removed: false, skipped: true } : { skipped: !i.skipped })}
+                            className={cn(
+                              "flex size-10 items-center justify-center rounded-[10px]",
+                              i.skipped && !i.removed ? "bg-warn-bg text-warn" : "text-muted-ink hover:bg-paper",
+                            )}
+                          >
+                            <CalendarOff aria-hidden className="size-4" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          aria-label={i.removed ? `Restore ${i.name}` : `Remove ${i.name}`}
+                          title={i.removed ? "Undo" : "Remove"}
+                          onClick={() => removeItem(c.key, i)}
+                          className="flex size-10 items-center justify-center rounded-[10px] text-muted-ink hover:bg-paper"
+                        >
+                          {i.removed ? <Undo2 className="size-4" /> : <X className="size-4" />}
+                        </button>
+                      </div>
                     </div>
+                    {i.removed ? (
+                      <span className="pl-2.5 text-xs text-muted-ink">
+                        Will be removed on save.{i.kind === "monthly" && ` To leave it out of ${monthName} only, use the calendar button.`}
+                      </span>
+                    ) : i.kind === "monthly" && i.skipped ? (
+                      <span className="pl-2.5 text-xs font-medium text-warn">Skipped for {monthName} — back next month.</span>
+                    ) : null}
                     {/* Last month's actual spend on this item; hidden when there was none. */}
                     {i.id && data.prevSpentByItem[i.id] ? (
                       <span className="pl-2.5 text-xs text-muted-ink">
