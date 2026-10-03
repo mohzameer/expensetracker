@@ -1,4 +1,4 @@
-import { addDays, addMonths, diffDays, dueDateIn, formatDay, formatMonth, periodEnd, periodOf, periodStart, weekStart, type Range } from "./dates";
+import { addDays, addMonths, diffDays, formatDay, formatMonth, periodEnd, periodOf, periodStart, weekStart, type Range } from "./dates";
 
 /** One expense, as the Analysis page sees it. */
 export type Row = {
@@ -20,11 +20,11 @@ export type ItemRef = {
   kind: "monthly" | "one_off";
   expectedAmount: number | null;
   defaultAmount: number | null;
-  /** Day of the month a monthly item is due, if it has one. */
-  dueDay: number | null;
   ym: string | null;
   archived: boolean;
   createdOn: string;
+  /** Budget months a monthly item was left out of (Setup's "Skip"). */
+  skippedIn: string[];
 };
 
 export type CategoryRef = { id: string; name: string; color: string; archived?: boolean };
@@ -126,8 +126,9 @@ type CycleItem = {
   categoryId: string;
   name: string;
   kind: "monthly" | "one_off";
-  dueDay: number | null;
+  /** null when there is no amount, or the item was skipped for this month. */
   planned: number | null;
+  skipped: boolean;
   /** Position in Setup's order. */
   order: number;
   /** Worth listing even with nothing spent: planned, still in use, and it existed by then. */
@@ -136,7 +137,8 @@ type CycleItem = {
 
 /**
  * The items that belong to budget month `ym`, by key: every monthly item plus that
- * month's one-offs. Planned = a monthly item's expected amount, or the one-off's amount.
+ * month's one-offs. Planned = a monthly item's expected amount (nothing if it was skipped
+ * for this month), or the one-off's amount.
  */
 function cycleItems(items: ItemRef[], categories: CategoryRef[], ym: string, startDay: number): Map<string, CycleItem> {
   const live = new Set(categories.filter((c) => !c.archived).map((c) => c.id));
@@ -145,16 +147,17 @@ function cycleItems(items: ItemRef[], categories: CategoryRef[], ym: string, sta
   items.forEach((it, order) => {
     if (it.kind === "one_off" && it.ym !== ym) return;
     const key = itemKey(it.categoryId, it.name);
-    const amount = it.kind === "monthly" ? it.expectedAmount : it.defaultAmount;
-    const listable = amount != null && !it.archived && live.has(it.categoryId) && (it.kind === "one_off" || it.createdOn < end);
+    const skipped = it.kind === "monthly" && it.skippedIn.includes(ym);
+    const amount = skipped ? null : it.kind === "monthly" ? it.expectedAmount : it.defaultAmount;
+    const listable = (amount != null || skipped) && !it.archived && live.has(it.categoryId) && (it.kind === "one_off" || it.createdOn < end);
     const cur = out.get(key);
     if (cur) {
       // A monthly item and a one-off with the same name: one line, amounts added.
       if (amount != null) cur.planned = (cur.planned ?? 0) + amount;
       cur.listable ||= listable;
-      cur.dueDay ??= it.kind === "monthly" ? it.dueDay : null;
+      cur.skipped &&= skipped;
     } else {
-      out.set(key, { key, categoryId: it.categoryId, name: it.name, kind: it.kind, dueDay: it.kind === "monthly" ? it.dueDay : null, planned: amount, order, listable });
+      out.set(key, { key, categoryId: it.categoryId, name: it.name, kind: it.kind, planned: amount, skipped, order, listable });
     }
   });
   return out;
@@ -219,7 +222,8 @@ export type GridItem = {
   /** null = spending in the category without an item. */
   name: string | null;
   kind: "monthly" | "one_off" | null;
-  dueDate: string | null;
+  /** A monthly item left out of this month: nothing planned for it. */
+  skipped: boolean;
   /** Distinct days it was paid on, oldest first. */
   paidOn: string[];
   planned: number | null;
@@ -229,7 +233,7 @@ export type GridCategory = { id: string | null; name: string; color: string; pla
 
 /**
  * One budget month as a table: every item that was planned or spent on, under its category
- * (in Setup's order), with due date, the days it was paid, planned and spent. Uncategorised
+ * (in Setup's order), with the days it was paid, planned and spent. Uncategorised
  * spending comes last.
  */
 export function cycleGrid(rows: Row[], items: ItemRef[], categories: CategoryRef[], ym: string, startDay: number): { categories: GridCategory[]; planned: number; spent: number } {
@@ -240,7 +244,7 @@ export function cycleGrid(rows: Row[], items: ItemRef[], categories: CategoryRef
     if (!it.listable) continue;
     lines.set(it.key, {
       key: it.key, categoryId: it.categoryId, name: it.name, kind: it.kind, order: it.order,
-      dueDate: it.dueDay ? dueDateIn(range, it.dueDay) : null, paidOn: [], planned: it.planned, spent: 0,
+      skipped: it.skipped, paidOn: [], planned: it.planned, spent: 0,
     });
   }
   const seen = new Map<string | null, { name: string; color: string }>();
@@ -253,7 +257,7 @@ export function cycleGrid(rows: Row[], items: ItemRef[], categories: CategoryRef
       key, categoryId: r.categoryId, name: r.itemName, kind: m?.kind ?? null,
       // Items first (Setup's order), then spending without an item.
       order: m?.order ?? (r.itemName ? items.length : items.length + 1),
-      dueDate: m?.dueDay ? dueDateIn(range, m.dueDay) : null, paidOn: [], planned: m?.planned ?? null, spent: 0,
+      skipped: m?.skipped ?? false, paidOn: [], planned: m?.planned ?? null, spent: 0,
     };
     line.spent += r.amount;
     if (!line.paidOn.includes(r.date)) line.paidOn.push(r.date);
@@ -266,7 +270,7 @@ export function cycleGrid(rows: Row[], items: ItemRef[], categories: CategoryRef
     const list = [...lines.values()]
       .filter((l) => l.categoryId === id)
       .sort((a, b) => a.order - b.order || (a.name ?? "").localeCompare(b.name ?? ""))
-      .map((l): GridItem => ({ key: l.key, name: l.name, kind: l.kind, dueDate: l.dueDate, paidOn: [...l.paidOn].sort(), planned: l.planned, spent: l.spent }));
+      .map((l): GridItem => ({ key: l.key, name: l.name, kind: l.kind, skipped: l.skipped, paidOn: [...l.paidOn].sort(), planned: l.planned, spent: l.spent }));
     if (!list.length) continue;
     groups.push({
       id,

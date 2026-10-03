@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 
 type Data = Awaited<ReturnType<typeof getSetupPage>>;
 type Kind = "monthly" | "one_off";
-type ItemState = { key: string; id: string | null; name: string; kind: Kind; amount: string; dueDay: string; removed: boolean };
+type ItemState = { key: string; id: string | null; name: string; kind: Kind; amount: string; skipped: boolean; removed: boolean };
 type CatState = {
   key: string;
   id: string | null;
@@ -52,7 +52,7 @@ function initialState(data: Data): CatState[] {
       name: i.name,
       kind: i.kind,
       amount: toInputValue(i.kind === "monthly" ? i.expectedAmount : i.defaultAmount),
-      dueDay: i.dueDay == null ? "" : String(i.dueDay),
+      skipped: i.skipped,
       removed: false,
     })),
   }));
@@ -60,8 +60,8 @@ function initialState(data: Data): CatState[] {
 
 const field = "min-h-10 w-full rounded-[10px] border border-line-strong bg-surface px-2.5 text-[15px] outline-none focus:border-teal disabled:bg-paper";
 const label = "text-xs font-semibold text-muted-ink";
-/** Item rows: name · kind · due day · amount · remove. */
-const ITEM_GRID = "grid grid-cols-[minmax(0,1fr)_100px_56px_100px_40px] gap-2";
+/** Item rows: name · kind · skip this month · amount · remove. */
+const ITEM_GRID = "grid grid-cols-[minmax(0,1fr)_100px_72px_100px_40px] gap-2";
 
 export function SetupForm({ data }: { data: Data }) {
   const initial = useMemo(() => initialState(data), [data]);
@@ -103,8 +103,11 @@ export function SetupForm({ data }: { data: Data }) {
     );
 
   const live = cats.filter((c) => !c.removed);
+  // A monthly item skipped for this month counts for nothing here.
   const sumOf = (c: CatState, kind: Kind) =>
-    c.items.filter((i) => !i.removed && i.kind === kind).reduce((a, i) => a + (parseMoney(i.amount) ?? 0), 0);
+    c.items.filter((i) => !i.removed && i.kind === kind && !(kind === "monthly" && i.skipped)).reduce((a, i) => a + (parseMoney(i.amount) ?? 0), 0);
+  const skippedOf = (c: CatState) =>
+    c.items.filter((i) => !i.removed && i.kind === "monthly" && i.skipped).reduce((a, i) => a + (parseMoney(i.amount) ?? 0), 0);
   // A cap is never typed: it is the total of the category's items. Closed months show the cap they closed with.
   const storedCaps = useMemo(() => new Map(data.categories.map((c) => [c.id, c.cap])), [data]);
   const capOf = (c: CatState) =>
@@ -132,7 +135,6 @@ export function SetupForm({ data }: { data: Data }) {
         if (!i.name.trim()) return void toast.error(`${c.name}: every item needs a name.`);
         if (i.kind === "monthly" && !parseMoney(i.amount)) return void toast.error(`${i.name}: monthly items need an expected amount.`);
         if (i.amount && parseMoney(i.amount) == null) return void toast.error(`${i.name}: the amount isn't valid.`);
-        if (i.kind === "monthly" && i.dueDay && (Number(i.dueDay) < 1 || Number(i.dueDay) > 31)) return void toast.error(`${i.name}: the due day is a day of the month, 1–31.`);
       }
     }
     const names = live.map((c) => c.name.trim().toLowerCase());
@@ -162,7 +164,7 @@ export function SetupForm({ data }: { data: Data }) {
                 kind: i.kind,
                 expectedAmount: i.kind === "monthly" ? amt : null,
                 defaultAmount: i.kind === "one_off" ? amt : null,
-                dueDay: i.kind === "monthly" && i.dueDay ? Number(i.dueDay) : null,
+                skipped: i.kind === "monthly" && i.skipped,
                 removed: i.removed,
               };
             }),
@@ -311,8 +313,11 @@ export function SetupForm({ data }: { data: Data }) {
                 {!closed && (
                   <div className="text-[13px] text-muted-ink">
                     {monthly + oneOff === 0
-                      ? "No cap yet — add items with amounts."
+                      ? skippedOf(c) > 0
+                        ? "No cap this month — everything here is skipped."
+                        : "No cap yet — add items with amounts."
                       : `Cap = monthly ${formatAmount(monthly)}${oneOff > 0 ? ` + one-off ${formatAmount(oneOff)}` : ""}`}
+                    {monthly + oneOff > 0 && skippedOf(c) > 0 && ` · ${formatAmount(skippedOf(c))} skipped this month`}
                   </div>
                 )}
                 <div className="flex flex-col gap-1.5 border-t border-line-soft pt-2.5">
@@ -320,7 +325,7 @@ export function SetupForm({ data }: { data: Data }) {
                     <div className={cn(ITEM_GRID, "text-[11px] font-semibold tracking-wider text-muted-ink uppercase")}>
                       <span>Item</span>
                       <span>Kind</span>
-                      <span title="Day of the month a monthly item is due. Optional.">Due day</span>
+                      <span title={`Leave a monthly item out of ${monthName} only: no cap, not due. It is back next month.`}>{formatMonth(data.ym, { month: "short" })}</span>
                       <span className="text-right">Amount</span>
                       <span />
                     </div>
@@ -347,15 +352,20 @@ export function SetupForm({ data }: { data: Data }) {
                         <option value="monthly">Monthly</option>
                       </select>
                       {i.kind === "monthly" ? (
-                        <input
-                          aria-label={`Due day of the month for ${i.name || "item"} (optional)`}
-                          inputMode="numeric"
-                          placeholder="—"
-                          value={i.dueDay}
+                        <button
+                          type="button"
+                          aria-pressed={i.skipped}
+                          aria-label={`Skip ${i.name || "item"} for ${monthName}`}
+                          title={i.skipped ? `Left out of ${monthName}. Click to include it again.` : `Leave out of ${monthName} only`}
                           disabled={i.removed}
-                          onChange={(e) => updateItem(c.key, i.key, { dueDay: e.target.value.replace(/\D/g, "").slice(0, 2) })}
-                          className={cn(field, "px-1.5 text-center")}
-                        />
+                          onClick={() => updateItem(c.key, i.key, { skipped: !i.skipped })}
+                          className={cn(
+                            "min-h-10 rounded-[10px] border text-[13px] font-semibold",
+                            i.skipped ? "border-warn-bar bg-warn-bg text-warn" : "border-line text-muted-ink hover:border-line-strong",
+                          )}
+                        >
+                          {i.skipped ? "Skipped" : "Skip"}
+                        </button>
                       ) : (
                         <span />
                       )}
@@ -366,7 +376,7 @@ export function SetupForm({ data }: { data: Data }) {
                         value={i.amount}
                         disabled={i.removed}
                         onChange={(e) => updateItem(c.key, i.key, { amount: e.target.value })}
-                        className={cn(field, "text-right", i.kind === "monthly" && !parseMoney(i.amount) && !i.removed && "border-warn-bar")}
+                        className={cn(field, "text-right", i.kind === "monthly" && !parseMoney(i.amount) && !i.removed && "border-warn-bar", i.kind === "monthly" && i.skipped && "text-faint line-through")}
                       />
                       <button
                         type="button"
@@ -388,7 +398,7 @@ export function SetupForm({ data }: { data: Data }) {
                   <button
                     type="button"
                     onClick={() =>
-                      updateCat(c.key, { items: [...c.items, { key: newKey(), id: null, name: "", kind: "one_off", amount: "", dueDay: "", removed: false }] })
+                      updateCat(c.key, { items: [...c.items, { key: newKey(), id: null, name: "", kind: "one_off", amount: "", skipped: false, removed: false }] })
                     }
                     className="flex min-h-10 items-center gap-1.5 self-start rounded-[10px] px-2.5 text-sm font-semibold text-teal hover:bg-teal-wash"
                   >

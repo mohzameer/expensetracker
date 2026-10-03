@@ -6,6 +6,8 @@ import type { Db } from "@/db/client";
  *
  *   cap for a month = its monthly items' amounts + that month's one-off items' planned amounts
  *
+ * A monthly item skipped for a month (item_skips) is left out of that month's cap.
+ *
  * This is the only place `category_budgets.allocation` is written. It rewrites
  * every OPEN month (closed months keep the cap they closed with), for one
  * category or for all of them. Covers and "raise cap" sit on top as transfers.
@@ -15,7 +17,8 @@ export async function syncCaps(db: Db, categoryId?: string) {
     INSERT INTO category_budgets (month_id, category_id, allocation)
     SELECT m.id, c.id,
       coalesce((SELECT sum(i.expected_amount) FROM items i
-                WHERE i.category_id = c.id AND i.kind = 'monthly' AND i.archived_at IS NULL), 0)
+                WHERE i.category_id = c.id AND i.kind = 'monthly' AND i.archived_at IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM item_skips s WHERE s.item_id = i.id AND s.month_id = m.id)), 0)
       + coalesce((SELECT sum(coalesce(i.default_amount, 0)) FROM items i
                   WHERE i.category_id = c.id AND i.kind = 'one_off' AND i.month_id = m.id AND i.archived_at IS NULL), 0)
     FROM months m

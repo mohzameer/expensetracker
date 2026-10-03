@@ -65,11 +65,10 @@ export function Breakdown({ data, onPick }: { data: Data; onPick: (t: Target) =>
         <Empty>Nothing planned or spent in {formatMonth(ym)}.</Empty>
       ) : (
         <section className="card overflow-x-auto p-0">
-          <table className="w-full min-w-[620px] border-collapse text-sm">
+          <table className="w-full min-w-[540px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-line">
                 <th scope="col" className={cn(th, sticky, "bg-surface text-left")}>Item</th>
-                <th scope="col" className={cn(th, "text-left")}>Due</th>
                 <th scope="col" className={cn(th, "text-left")}>Paid on</th>
                 <th scope="col" className={cn(th, "text-right")}>Planned</th>
                 <th scope="col" className={cn(th, "text-right")}>Spent</th>
@@ -80,7 +79,7 @@ export function Breakdown({ data, onPick }: { data: Data; onPick: (t: Target) =>
               {grid.categories.map((c) => (
                 <Fragment key={c.id ?? "none"}>
                   <tr className="border-t border-line bg-paper">
-                    <th scope="rowgroup" colSpan={3} className={cn(sticky, "bg-paper px-3 py-2.5 text-left")}>
+                    <th scope="rowgroup" colSpan={2} className={cn(sticky, "bg-paper px-3 py-2.5 text-left")}>
                       <span className="flex items-center gap-2 text-[13px] font-semibold tracking-wide uppercase">
                         <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ background: c.color }} />
                         <span className="truncate">{c.name}</span>
@@ -102,15 +101,10 @@ export function Breakdown({ data, onPick }: { data: Data; onPick: (t: Target) =>
                           {i.name ?? (c.id ? "No item" : "Not sorted yet")}
                         </button>
                       </th>
-                      <td className="px-3 py-2.5 whitespace-nowrap text-muted-ink">
-                        {i.dueDate ? (
-                          <span className={cn(i.dueDate < data.today && i.planned != null && i.spent < i.planned && "font-semibold text-warn")}>{short(i.dueDate)}</span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
                       <td className="px-3 py-2.5 whitespace-nowrap text-muted-ink">{paidOn(i)}</td>
-                      <td className={cn(num, i.planned == null && "text-faint")}>{i.planned == null ? "—" : formatAmount(i.planned)}</td>
+                      <td className={cn(num, i.planned == null && "text-faint")}>
+                        {i.skipped ? <span className="text-xs font-medium text-muted-ink">skipped</span> : i.planned == null ? "—" : formatAmount(i.planned)}
+                      </td>
                       <td className={cn(num, i.spent === 0 && "text-faint")}>{formatAmount(i.spent)}</td>
                       <Left planned={i.planned} spent={i.spent} />
                     </tr>
@@ -120,7 +114,7 @@ export function Breakdown({ data, onPick }: { data: Data; onPick: (t: Target) =>
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-line-strong">
-                <th scope="row" colSpan={3} className={cn(sticky, "bg-surface px-3 py-3 text-left text-[13px] font-semibold tracking-wide uppercase")}>
+                <th scope="row" colSpan={2} className={cn(sticky, "bg-surface px-3 py-3 text-left text-[13px] font-semibold tracking-wide uppercase")}>
                   Total
                 </th>
                 <td className={cn(num, "py-3 font-semibold")}>{formatAmount(grid.planned)}</td>
@@ -132,8 +126,8 @@ export function Breakdown({ data, onPick }: { data: Data; onPick: (t: Target) =>
         </section>
       )}
       <p className="text-xs text-muted-ink">
-        Tap an item for its day-by-day history. An amber due date is past and not fully paid. Planned is each item&apos;s amount in Setup; for earlier months a monthly
-        item is compared with today&apos;s amount.
+        Tap an item for its day-by-day history. Planned is each item&apos;s amount in Setup; for earlier months a monthly item is compared with today&apos;s amount.
+        Skipped items were left out of this month in Setup.
       </p>
     </>
   );

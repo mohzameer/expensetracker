@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatAmount, formatMoney, parseMoney, toInputValue } from "@/lib/money";
 import { budgetState, stateAfter } from "@/lib/budget";
-import { addDays, addMonths, clampToMonth, dueDateIn, isIsoDate, lastDay, relativeDay, today } from "@/lib/dates";
+import { addDays, addMonths, clampToMonth, isIsoDate, lastDay, relativeDay, today } from "@/lib/dates";
 import { cycleGrid, groupByDay, inRange, itemKey, monthBuckets, monthOfRange, presetRange, rangeBars, rowKey, searchRows, topItems, type ItemRef, type Row, type Search } from "@/lib/analysis";
 
 describe("money", () => {
@@ -78,7 +78,7 @@ describe("analysis", () => {
     extra: Partial<ItemRef> = {},
   ): ItemRef => ({
     categoryId, name, kind, expectedAmount: kind === "monthly" ? amount : null, defaultAmount: kind === "one_off" ? amount : null,
-    dueDay: null, ym, archived: false, createdOn: "2026-01-01", ...extra,
+    ym, archived: false, createdOn: "2026-01-01", skippedIn: [], ...extra,
   });
 
   it("identifies an item by category and name, so one-offs join up across months", () => {
@@ -145,7 +145,7 @@ describe("analysis", () => {
     expect(topItems(rows, items, cats, null, 25).map((t) => t.planned)).toEqual([null, null, null]);
   });
 
-  it("lays a budget month out as a grid: items under categories with due and paid dates", () => {
+  it("lays a budget month out as a grid: items under categories with the days they were paid", () => {
     const rows = [
       row("2026-10-02", 21000, "Internet"),
       row("2026-09-28", 1000, "Uber", "ride"),
@@ -156,25 +156,28 @@ describe("analysis", () => {
       row("2026-08-01", 5000, "Internet"), // another cycle
     ];
     const items = [
-      item("food", "Internet", "monthly", 25000, null, { dueDay: 15 }),
-      item("food", "Water", "monthly", 27000, null, { dueDay: 28 }), // unpaid, still listed
-      item("food", "Gas", "monthly", 3000, null), // no due day
+      item("food", "Internet", "monthly", 25000, null),
+      item("food", "Water", "monthly", 27000, null), // unpaid, still listed
+      item("food", "Gas", "monthly", 3000, null, { skippedIn: ["2026-09"] }), // left out of September
       item("ride", "Uber", "one_off", 1250, "2026-09"),
       item("ride", "Tuk", "one_off", null, "2026-09"), // no amount, nothing spent: not listed
       item("food", "Later", "monthly", 900, null, { createdOn: "2026-11-02" }),
     ];
     const grid = cycleGrid(rows, items, cats, "2026-09", 25);
-    expect(grid.categories.map((c) => [c.name, c.planned, c.spent])).toEqual([["Food", 55000, 21300], ["Rides", 1250, 2000], ["Needs category", 0, 90]]);
-    expect([grid.planned, grid.spent]).toEqual([56250, 23390]);
-    expect(grid.categories[0].items.map((i) => [i.name, i.dueDate, i.paidOn, i.planned, i.spent])).toEqual([
-      ["Internet", "2026-10-15", ["2026-10-02"], 25000, 21000],
-      ["Water", "2026-09-28", [], 27000, 0],
-      ["Gas", null, [], 3000, 0],
-      [null, null, ["2026-10-03"], null, 300],
+    expect(grid.categories.map((c) => [c.name, c.planned, c.spent])).toEqual([["Food", 52000, 21300], ["Rides", 1250, 2000], ["Needs category", 0, 90]]);
+    expect([grid.planned, grid.spent]).toEqual([53250, 23390]);
+    expect(grid.categories[0].items.map((i) => [i.name, i.skipped, i.paidOn, i.planned, i.spent])).toEqual([
+      ["Internet", false, ["2026-10-02"], 25000, 21000],
+      ["Water", false, [], 27000, 0],
+      ["Gas", true, [], null, 0], // skipped: shown, nothing planned
+      [null, false, ["2026-10-03"], null, 300],
     ]);
     expect(grid.categories[1].items).toEqual([
-      { key: "ride:uber", name: "Uber", kind: "one_off", dueDate: null, paidOn: ["2026-09-28", "2026-10-01"], planned: 1250, spent: 2000 },
+      { key: "ride:uber", name: "Uber", kind: "one_off", skipped: false, paidOn: ["2026-09-28", "2026-10-01"], planned: 1250, spent: 2000 },
     ]);
+    // Skipping is per month: Gas is planned again in October, and Top items leaves a skipped, unspent item out.
+    expect(cycleGrid([], items, cats, "2026-10", 25).categories[0].items.find((i) => i.name === "Gas")).toMatchObject({ skipped: false, planned: 3000 });
+    expect(topItems([], items, cats, "2026-09", 25).map((t) => t.name)).not.toContain("Gas");
     // The item created in November isn't planned for September, but is for November.
     expect(cycleGrid([], items, cats, "2026-11", 25).categories[0].items.map((i) => i.name)).toContain("Later");
   });
@@ -193,21 +196,5 @@ describe("analysis", () => {
     expect(find({ q: "rides" })).toEqual([100]);
     expect(find({ accountId: "none" })).toEqual([200]);
     expect(find({ categoryId: "ride", accountId: "bank" })).toEqual([100]);
-  });
-});
-
-describe("due dates", () => {
-  it("puts a day of the month inside the budget month", () => {
-    const sep = { from: "2026-09-25", to: "2026-10-25" };
-    expect(dueDateIn(sep, 1)).toBe("2026-10-01");
-    expect(dueDateIn(sep, 24)).toBe("2026-10-24");
-    expect(dueDateIn(sep, 25)).toBe("2026-09-25");
-    expect(dueDateIn(sep, 28)).toBe("2026-09-28");
-    // A day the month doesn't have uses its last day.
-    expect(dueDateIn(sep, 31)).toBe("2026-09-30");
-    expect(dueDateIn({ from: "2027-02-25", to: "2027-03-25" }, 30)).toBe("2027-02-28");
-    // Calendar months.
-    expect(dueDateIn({ from: "2026-10-01", to: "2026-11-01" }, 15)).toBe("2026-10-15");
-    expect(dueDateIn({ from: "2027-02-01", to: "2027-03-01" }, 31)).toBe("2027-02-28");
   });
 });

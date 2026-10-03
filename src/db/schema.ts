@@ -147,8 +147,6 @@ export const items = pgTable(
     kind: text({ enum: ["monthly", "one_off"] }).notNull(),
     expectedAmount: money(), // monthly items
     defaultAmount: money(), // one-off prefill
-    // Optional day of the month a monthly item is due (1–31); null = no particular day.
-    dueDay: integer(),
     // One-off items belong to the month they were added for; monthly items (null) carry into every month.
     monthId: uuid().references(() => months.id),
     sortOrder: integer().notNull().default(0),
@@ -170,7 +168,6 @@ export const items = pgTable(
     check("items_monthly_expected", sql`kind <> 'monthly' or expected_amount is not null`),
     check("items_expected_positive", sql`expected_amount is null or expected_amount > 0`),
     check("items_default_positive", sql`default_amount is null or default_amount > 0`),
-    check("items_due_day", sql`due_day is null or due_day between 1 and 31`),
   ],
 );
 
@@ -291,6 +288,23 @@ export const categoryMonthSummary = pgView("category_month_summary", {
   remaining: money().notNull(), // before the month-close sweep
   swept: money().notNull(),
 }).existing();
+
+/**
+ * A monthly item left out of one month: for that month it adds nothing to its
+ * category's cap and isn't due. It comes back by itself the next month.
+ */
+export const itemSkips = pgTable(
+  "item_skips",
+  {
+    itemId: uuid()
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    monthId: uuid()
+      .notNull()
+      .references(() => months.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.itemId, t.monthId] })],
+);
 
 /** Per month and monthly item: expected, paid so far and status. */
 export const monthlyItemStatus = pgView("monthly_item_status", {

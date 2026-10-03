@@ -368,35 +368,51 @@ describe("income", () => {
   });
 });
 
-describe("due day on monthly items", () => {
-  const due = async (itemId: string) => (await getMonthlyItems(db, (await getMonth(db, "2026-09"))!)).find((d) => d.itemId === itemId)!.dueDate;
-  const setup = (s: Awaited<ReturnType<typeof seedSeptember>>, dueDay: number | null) =>
+describe("skipping a monthly item for one month", () => {
+  const cap = async (ym: string, categoryId: string) => (await summary(ym, categoryId)).allocation;
+  const dueNames = async (ym: string) => (await getMonthlyItems(db, (await getMonth(db, ym))!)).map((d) => d.name);
+  const setup = (s: Awaited<ReturnType<typeof seedSeptember>>, ym: string, skipped: boolean) =>
     saveSetup(db, {
-      ym: "2026-09", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
+      ym, defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
       categories: [{ id: s.utilities.id, name: "Utilities", color: "#00897B", alertPct: null, removed: false,
-        items: [{ id: s.internet.id, name: "Internet", kind: "monthly", expectedAmount: rs(3990), defaultAmount: null, dueDay, removed: false }] }],
+        items: [{ id: s.internet.id, name: "Internet", kind: "monthly", expectedAmount: rs(3990), defaultAmount: null, skipped, removed: false }] }],
     });
 
-  it("is optional, can be set and cleared, and dated items come first", async () => {
+  it("takes it out of that month's cap and Due list only, and can be undone", async () => {
     const s = await seedSeptember(db);
-    expect(await due(s.internet.id)).toBeNull();
-    await setup(s, 15);
-    expect(await due(s.internet.id)).toBe("2026-09-15");
-    const list = await getMonthlyItems(db, (await getMonth(db, "2026-09"))!);
-    expect(list[0].itemId).toBe(s.internet.id);
-    await setup(s, null);
-    expect(await due(s.internet.id)).toBeNull();
-    // The cap is untouched either way.
-    expect((await summary("2026-09", s.utilities.id)).allocation).toBe(rs(18000));
+    await ensureMonth(db, "2026-10");
+    await setup(s, "2026-09", true);
+    expect(await cap("2026-09", s.utilities.id)).toBe(rs(14010));
+    expect(await dueNames("2026-09")).not.toContain("Internet");
+    // October is untouched, and so is a month created afterwards.
+    expect(await cap("2026-10", s.utilities.id)).toBe(rs(18000));
+    expect(await dueNames("2026-10")).toContain("Internet");
+    await ensureMonth(db, "2026-11");
+    expect(await cap("2026-11", s.utilities.id)).toBe(rs(18000));
+
+    await setup(s, "2026-09", false);
+    expect(await cap("2026-09", s.utilities.id)).toBe(rs(18000));
+    expect(await dueNames("2026-09")).toContain("Internet");
   });
 
-  it("is stored when an item is created, and must be a real day", async () => {
+  it("still shows a payment made on a skipped item", async () => {
     const s = await seedSeptember(db);
-    const rent = await createItem(db, { categoryId: s.dining.id, name: "Rent", kind: "monthly", expectedAmount: rs(100), dueDay: 28, ym: "2026-09" });
-    expect(rent.dueDay).toBe(28);
-    // One-offs never carry a due day.
-    expect((await createItem(db, { categoryId: s.dining.id, name: "Gift", kind: "one_off", dueDay: 5, ym: "2026-09" })).dueDay).toBeNull();
-    await expect(createItem(db, { categoryId: s.dining.id, name: "Bad", kind: "monthly", expectedAmount: rs(100), dueDay: 32, ym: "2026-09" })).rejects.toThrow();
+    await setup(s, "2026-09", true);
+    await s.expense(s.utilities.id, rs(500), "2026-09-12", s.internet.id);
+    expect(await dueNames("2026-09")).toContain("Internet");
+    expect((await summary("2026-09", s.utilities.id)).spent).toBe(rs(500));
+  });
+
+  it("can be set on an item created in the same save", async () => {
+    const s = await seedSeptember(db);
+    await saveSetup(db, {
+      ym: "2026-09", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
+      categories: [{ id: s.dining.id, name: "Dining", color: "#00897B", alertPct: null, removed: false,
+        items: [{ id: null, name: "Club", kind: "monthly", expectedAmount: rs(2000), defaultAmount: null, skipped: true, removed: false }] }],
+    });
+    expect(await cap("2026-09", s.dining.id)).toBe(rs(12000));
+    await ensureMonth(db, "2026-10");
+    expect(await cap("2026-10", s.dining.id)).toBe(rs(14000));
   });
 });
 

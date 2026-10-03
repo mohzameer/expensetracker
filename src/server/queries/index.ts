@@ -1,9 +1,9 @@
 import "server-only";
 import { and, asc, desc, eq, gt, gte, isNotNull, isNull, lt, lte, sql, sum } from "drizzle-orm";
 import type { Db } from "@/db";
-import { accountEntries, accounts, categories, categoryBudgets, categoryMonthSummary, expenses, incomes, items, monthlyItemStatus, months } from "@/db/schema";
+import { accountEntries, accounts, categories, categoryBudgets, categoryMonthSummary, expenses, incomes, items, itemSkips, monthlyItemStatus, months } from "@/db/schema";
 import { getAccounts, totalBalance } from "@/server/domain/accounts";
-import { addDays, addMonths, diffDays, dueDateIn, formatDay, formatRange, periodOf, periodStart, today, type Range } from "@/lib/dates";
+import { addDays, addMonths, diffDays, formatDay, formatRange, periodOf, periodStart, today, type Range } from "@/lib/dates";
 import { stateAfter } from "@/lib/budget";
 import { closeBlockers, currentYm, ensureMonth, getMonth, getSettings, monthOfDate, rangeOf, type Month } from "@/server/domain/months";
 import { itemsForMonth } from "@/server/domain/catalog";
@@ -32,7 +32,6 @@ export type CatalogItem = {
   kind: "monthly" | "one_off";
   expectedAmount: number | null;
   defaultAmount: number | null;
-  dueDay: number | null;
 };
 
 export type DueItem = {
@@ -43,8 +42,6 @@ export type DueItem = {
   expected: number;
   paid: number;
   status: "unpaid" | "partial" | "paid";
-  /** When it falls due in this month, if the item has a due day. */
-  dueDate: string | null;
 };
 
 export type MonthInfo = { yearMonth: string; status: "open" | "closed"; defaultAlertPct: number } | null;
@@ -109,18 +106,12 @@ export async function getMonthlyItems(db: Db, month: Month | null): Promise<DueI
       expected: monthlyItemStatus.expected,
       paid: monthlyItemStatus.paid,
       status: monthlyItemStatus.status,
-      dueDay: items.dueDay,
     })
     .from(monthlyItemStatus)
     .innerJoin(categories, eq(categories.id, monthlyItemStatus.categoryId))
-    .innerJoin(items, eq(items.id, monthlyItemStatus.itemId))
     .where(eq(monthlyItemStatus.monthId, month.id))
     .orderBy(asc(categories.sortOrder), asc(monthlyItemStatus.name));
-  const range = { from: month.startsOn, to: month.endsOn };
-  return rows
-    .map(({ dueDay, ...r }) => ({ ...r, dueDate: dueDay ? dueDateIn(range, dueDay) : null }))
-    // Dated items first, in date order; the rest keep their category order (sort is stable).
-    .sort((a, b) => (a.dueDate && b.dueDate ? a.dueDate.localeCompare(b.dueDate) : Number(!a.dueDate) - Number(!b.dueDate)));
+  return rows;
 }
 
 async function inboxCount(db: Db) {
@@ -496,7 +487,7 @@ export async function getAnalysis(db: Db) {
   const t = today();
   const settings = await getSettings(db);
   const from = periodStart(addMonths(periodOf(t, settings.periodStartDay), -12), settings.periodStartDay);
-  const [rows, cats, its, accountList] = await Promise.all([
+  const [rows, cats, its, accountList, skips] = await Promise.all([
     db
       .select(expenseColumns)
       .from(expenses)
@@ -508,12 +499,12 @@ export async function getAnalysis(db: Db) {
     db.select({ id: categories.id, name: categories.name, color: categories.color, archivedAt: categories.archivedAt }).from(categories).orderBy(asc(categories.sortOrder), asc(categories.name)),
     db
       .select({
+        id: items.id,
         categoryId: items.categoryId,
         name: items.name,
         kind: items.kind,
         expectedAmount: items.expectedAmount,
         defaultAmount: items.defaultAmount,
-        dueDay: items.dueDay,
         ym: months.yearMonth,
         archivedAt: items.archivedAt,
         createdAt: items.createdAt,
@@ -522,6 +513,8 @@ export async function getAnalysis(db: Db) {
       .leftJoin(months, eq(months.id, items.monthId))
       .orderBy(asc(items.sortOrder), asc(items.name)),
     getAccounts(db, true),
+    // Which months each monthly item was left out of.
+    db.select({ itemId: itemSkips.itemId, ym: months.yearMonth }).from(itemSkips).innerJoin(months, eq(months.id, itemSkips.monthId)),
   ]);
   return {
     today: t,
@@ -540,7 +533,12 @@ export async function getAnalysis(db: Db) {
       accountId: r.accountId,
     })),
     categories: cats.map((c) => ({ id: c.id, name: c.name, color: c.color, archived: !!c.archivedAt })),
-    items: its.map(({ archivedAt, createdAt, ...i }) => ({ ...i, archived: !!archivedAt, createdOn: createdAt.toISOString().slice(0, 10) })),
+    items: its.map(({ id, archivedAt, createdAt, ...i }) => ({
+      ...i,
+      archived: !!archivedAt,
+      createdOn: createdAt.toISOString().slice(0, 10),
+      skippedIn: skips.filter((s) => s.itemId === id).map((s) => s.ym),
+    })),
     accounts: accountList.map((a) => ({ id: a.id, name: a.name })),
   };
 }
@@ -596,13 +594,15 @@ export async function getSetupPage(db: Db, ym: string) {
   const cur = await currentYm(db);
   const month = ym >= cur ? await ensureMonth(db, ym) : await getMonth(db, ym);
   const prevYm = addMonths(ym, -1);
-  const [plan, settings, catalog, budgets, accountList] = await Promise.all([
+  const [plan, settings, catalog, budgets, accountList, skips] = await Promise.all([
     getMonthPlan(db, ym),
     getSettings(db),
     getCatalog(db, month),
     month ? db.select().from(categoryBudgets).where(eq(categoryBudgets.monthId, month.id)) : [],
     getAccounts(db),
+    month ? db.select({ itemId: itemSkips.itemId }).from(itemSkips).where(eq(itemSkips.monthId, month.id)) : [],
   ]);
+  const skipped = new Set(skips.map((s) => s.itemId));
   const byCat = new Map(budgets.map((b) => [b.categoryId, b]));
   // What each item cost in the previous month, to help set this month's amounts.
   const prevRange = await rangeOf(db, prevYm);
@@ -634,7 +634,7 @@ export async function getSetupPage(db: Db, ym: string) {
       alertPct: byCat.get(c.id)?.alertPct ?? null,
       items: catalog.items
         .filter((i) => i.categoryId === c.id)
-        .map((i) => ({ id: i.id, name: i.name, kind: i.kind, expectedAmount: i.expectedAmount, defaultAmount: i.defaultAmount, dueDay: i.dueDay })),
+        .map((i) => ({ id: i.id, name: i.name, kind: i.kind, expectedAmount: i.expectedAmount, defaultAmount: i.defaultAmount, skipped: skipped.has(i.id) })),
     })),
   };
 }

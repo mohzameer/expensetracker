@@ -214,7 +214,6 @@ export function DayView({ data }: { data: DayData }) {
                   <DueRow
                     key={d.itemId}
                     item={d}
-                    today={data.today}
                     onLog={() => openSheet({ kind: "add", prefill: { categoryId: d.categoryId, itemId: d.itemId, amount: d.expected - d.paid } })}
                   />
                 ))}
@@ -392,10 +391,8 @@ function PaidRow({ item }: { item: DueItem }) {
   );
 }
 
-function DueRow({ item, today, onLog }: { item: DueItem; today: string; onLog: () => void }) {
+function DueRow({ item, onLog }: { item: DueItem; onLog: () => void }) {
   const owed = item.expected - item.paid;
-  const overdue = item.dueDate !== null && item.dueDate < today;
-  const when = item.dueDate ? `${overdue ? "overdue" : "due"} ${formatDay(item.dueDate, { day: "numeric", month: "short" })}` : "monthly";
   return (
     <li className="flex items-center gap-3 py-2.5 pr-3 pl-3.5">
       {item.status === "partial" ? (
@@ -410,8 +407,7 @@ function DueRow({ item, today, onLog }: { item: DueItem; today: string; onLog: (
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate text-[15px] font-medium">{item.name}</span>
         <span className="truncate text-xs text-muted-ink">
-          {item.categoryName} · <span className={cn(overdue && "font-semibold text-warn")}>{when}</span>
-          {item.status === "partial" && ` · ${formatAmount(item.paid)} paid`}
+          {item.categoryName} · {item.status === "partial" ? `${formatAmount(item.paid)} paid` : "monthly"}
         </span>
       </div>
       <div className="flex flex-col items-end gap-0.5">

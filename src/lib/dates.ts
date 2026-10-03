@@ -115,20 +115,6 @@ export function formatRange(from: string, toExclusive: string): string {
 
 export type Range = { from: string; to: string }; // to is exclusive
 
-/**
- * The date in [from, to) that falls on day-of-month `day`: with months starting on
- * the 25th, day 1 of "September" is 1 Oct and day 28 is 28 Sep. A day past the end
- * of a month uses its last day (31 → 30 Sep).
- */
-export function dueDateIn(r: Range, day: number): string | null {
-  const first = r.from.slice(0, 7);
-  for (const ym of [first, addMonths(first, 1)]) {
-    const d = `${ym}-${String(Math.min(day, daysInMonth(ym))).padStart(2, "0")}`;
-    if (d >= r.from && d < r.to) return d;
-  }
-  return null;
-}
-
 /** Clamp a date into a range: used to date transfers made while viewing another month. */
 export function clampToRange(date: string, r: Range): string {
   if (date < r.from) return r.from;

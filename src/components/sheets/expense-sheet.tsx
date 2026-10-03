@@ -73,7 +73,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
   // (e.g. rent paid before you entered today's balance). Counts for budgets only.
   const [noDeduct, setNoDeduct] = useState(!!original && original.accountId === null);
   const [newCategory, setNewCategory] = useState<{ name: string; alertPct: string } | null>(null);
-  const [newItem, setNewItem] = useState<{ name: string; kind: "one_off" | "monthly"; amount: string; dueDay: string } | null>(null);
+  const [newItem, setNewItem] = useState<{ name: string; kind: "one_off" | "monthly"; amount: string } | null>(null);
   const [extraCats, setExtraCats] = useState<CatalogCategory[]>([]);
   const [extraItems, setExtraItems] = useState<CatalogItem[]>([]);
   const [creating, startCreating] = useTransition();
@@ -152,8 +152,6 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
     if (!newItem || !categoryId) return;
     const amt = parseMoney(newItem.amount);
     if (newItem.kind === "monthly" && !amt) return void toast.error("Monthly items need an expected amount.");
-    const dueDay = newItem.kind === "monthly" && newItem.dueDay ? Number(newItem.dueDay) : null;
-    if (dueDay != null && (dueDay < 1 || dueDay > 31)) return void toast.error("Due day is a day of the month, 1–31.");
     startCreating(async () => {
       const res = await createItemAction({
         categoryId,
@@ -161,7 +159,6 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
         kind: newItem.kind,
         expectedAmount: newItem.kind === "monthly" ? amt : null,
         defaultAmount: newItem.kind === "one_off" ? amt : null,
-        dueDay,
         ym: entryYm,
       });
       if (!res.ok) return void toast.error(res.error);
@@ -286,7 +283,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
             options={itemOptions}
             value={itemId}
             onChange={pickItem}
-            onCreate={(name) => setNewItem({ name, kind: "one_off", amount: amountStr, dueDay: "" })}
+            onCreate={(name) => setNewItem({ name, kind: "one_off", amount: amountStr })}
             emptyOption={{ label: "No item" }}
             placeholder={categoryId ? "Type to find or create" : "Pick a category first"}
             badge={
@@ -327,19 +324,6 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
                   Adds to {selectedCategory?.name}&apos;s cap{newItem.kind === "monthly" ? " every month" : ` for ${formatMonth(entryYm, { month: "long" })}`}.
                 </span>
               </div>
-              {newItem.kind === "monthly" && (
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="ni-due" className={fieldLabel}>Due on day of month (optional)</label>
-                  <input
-                    id="ni-due"
-                    inputMode="numeric"
-                    placeholder="e.g. 15"
-                    className={inputBox}
-                    value={newItem.dueDay}
-                    onChange={(e) => setNewItem({ ...newItem, dueDay: e.target.value.replace(/\D/g, "").slice(0, 2) })}
-                  />
-                </div>
-              )}
               <div className="flex gap-2">
                 <button type="button" onClick={() => setNewItem(null)} className="min-h-11 rounded-xl border border-line-strong bg-surface px-4 text-sm font-medium">Cancel</button>
                 <button type="button" disabled={creating || !newItem.name.trim()} onClick={createItem} className="min-h-11 flex-1 rounded-xl bg-teal text-sm font-semibold text-white disabled:opacity-60">
