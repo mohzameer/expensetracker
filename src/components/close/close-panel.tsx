@@ -134,12 +134,13 @@ export function ClosePanel({ data }: { data: Data }) {
             ) : (
               negatives.map((n) => {
                 const deficit = -n.remaining;
+                // Another category with money left, or raise this category's cap for the month.
                 const sources = [
                   ...data.summaries
                     .filter((s) => s.remaining > 0)
-                    .map((s) => ({ key: s.categoryId, label: s.name, available: s.remaining })),
-                  { key: "savings", label: "Savings", available: data.savings },
-                ].filter((s) => s.available > 0);
+                    .map((s) => ({ key: s.categoryId, label: `${s.name} (${formatAmount(s.remaining)})`, name: s.name, available: s.remaining })),
+                  { key: "raise", label: `Raise ${n.name}'s cap by ${formatAmount(deficit)}`, name: "", available: deficit },
+                ];
                 return (
                   <div key={n.categoryId} className="flex flex-wrap items-center gap-3 rounded-xl bg-paper px-3.5 py-2.5">
                     <span className="flex-1 text-[15px] font-medium">{n.name}</span>
@@ -161,11 +162,14 @@ export function ClosePanel({ data }: { data: Data }) {
                             moveToCategoryAction({
                               ym: data.ym,
                               toCategoryId: n.categoryId,
-                              source: src.key === "savings" ? { kind: "savings" } : { kind: "category", categoryId: src.key },
+                              source: src.key === "raise" ? { kind: "savings" } : { kind: "category", categoryId: src.key },
                               amount,
                               reason: "cover",
                             }),
-                          () => `Moved ${formatMoney(amount, data.currency)} from ${src.label} to ${n.name}`,
+                          () =>
+                            src.key === "raise"
+                              ? `${n.name}'s cap raised by ${formatMoney(amount, data.currency)}`
+                              : `Moved ${formatMoney(amount, data.currency)} from ${src.name} to ${n.name}`,
                         );
                         ev.target.value = "";
                       }}
@@ -175,7 +179,7 @@ export function ClosePanel({ data }: { data: Data }) {
                       </option>
                       {sources.map((s) => (
                         <option key={s.key} value={s.key}>
-                          {s.label} ({formatAmount(s.available)})
+                          {s.label}
                         </option>
                       ))}
                     </select>

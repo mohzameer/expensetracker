@@ -46,7 +46,7 @@ export function AccountsView({ data }: { data: Data }) {
           </span>
         </div>
         <div className="flex flex-col items-end gap-0.5">
-          <span className="text-[13px] text-muted-ink">Free now</span>
+          <span className="text-[13px] text-muted-ink">Savings</span>
           <span className={cn("font-display text-[40px] leading-tight font-semibold", data.free < 0 ? "text-bad" : "text-teal")}>
             {formatMoney(data.free, data.currency)}
           </span>
@@ -442,7 +442,7 @@ function TransferSheet({ data, fromId, onClose }: { data: Data; fromId?: string;
   );
 }
 
-/** Raise a budget out of free money (what used to be "Move from Savings"). */
+/** Raise a budget's cap for this month out of what's left as savings. */
 function TopUpSheet({ data, onClose }: { data: Data; onClose: () => void }) {
   const [categoryId, setCategoryId] = useState(data.categories[0]?.id ?? "");
   const [amount, setAmount] = useState("");
@@ -453,7 +453,7 @@ function TopUpSheet({ data, onClose }: { data: Data; onClose: () => void }) {
       open
       onOpenChange={(o) => !o && onClose()}
       title="Top up a budget"
-      description={<span className="text-muted-ink">Raises this month&apos;s cap using free money. No money moves between accounts.</span>}
+      description={<span className="text-muted-ink">Raises this month&apos;s cap out of your savings. No money moves between accounts.</span>}
     >
       <div className="flex flex-col gap-1.5">
         <label htmlFor="tu-cat" className={labelCls}>Category</label>
@@ -462,7 +462,7 @@ function TopUpSheet({ data, onClose }: { data: Data; onClose: () => void }) {
         </select>
       </div>
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="tu-amt" className={labelCls}>Amount · {formatMoney(Math.max(data.free, 0), data.currency)} free</label>
+        <label htmlFor="tu-amt" className={labelCls}>Amount · {formatMoney(Math.max(data.free, 0), data.currency)} left as savings</label>
         <input id="tu-amt" inputMode="decimal" className={inputCls} value={amount} onChange={(e) => setAmount(e.target.value)} />
       </div>
       <button

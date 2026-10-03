@@ -74,20 +74,25 @@ describe("covers", () => {
         todayStr: "2026-09-29",
       }),
     ).rejects.toThrow(/Only Rs 500/);
-    await expect(
-      moveToCategory(db, { ym: "2026-09", toCategoryId: s.dining.id, source: { kind: "savings" }, amount: rs(1000), todayStr: "2026-09-29" }),
-    ).rejects.toThrow(/Savings only has Rs 0 free/);
-
-    // Free = money in accounts − what's still unspent in budgets (500 Groceries + 18,000 Utilities).
+    // Savings = money in accounts − what's still unspent in budgets (500 Groceries + 18,000 Utilities).
     await createAccount(db, { name: "ComBank", opening: rs(23500), todayStr: "2026-09-29" });
     expect(await getSavingsBalance(db, "2026-09")).toBe(rs(5000));
-    // Covering an overspend doesn't change free money: that cash was already spent.
+
+    // "Raise this month's cap": Dining grows to fit what was spent, for this month only.
+    // It is never blocked and doesn't change savings — that cash was already spent.
     await moveToCategory(db, { ym: "2026-09", toCategoryId: s.dining.id, source: { kind: "savings" }, amount: rs(1000), todayStr: "2026-09-29" });
-    expect((await summary("2026-09", s.dining.id)).remaining).toBe(0);
+    const dining = await summary("2026-09", s.dining.id);
+    expect(dining).toMatchObject({ allocation: rs(12000), effectiveAllocation: rs(13000), remaining: 0 });
     expect(await getSavingsBalance(db, "2026-09")).toBe(rs(5000));
-    // Topping up a budget that still has room sets more money aside.
-    await moveToCategory(db, { ym: "2026-09", toCategoryId: s.groceries.id, source: { kind: "savings" }, amount: rs(1000), todayStr: "2026-09-29" });
+    await ensureMonth(db, "2026-10");
+    expect((await summary("2026-10", s.dining.id)).effectiveAllocation).toBe(rs(12000)); // next month: normal cap
+
+    // Topping up a budget that still has room sets more money aside, and is limited to what's left as savings.
+    await moveToCategory(db, { ym: "2026-09", toCategoryId: s.groceries.id, source: { kind: "savings" }, amount: rs(1000), todayStr: "2026-09-29", reason: "manual" });
     expect(await getSavingsBalance(db, "2026-09")).toBe(rs(4000));
+    await expect(
+      moveToCategory(db, { ym: "2026-09", toCategoryId: s.groceries.id, source: { kind: "savings" }, amount: rs(9000), todayStr: "2026-09-29", reason: "manual" }),
+    ).rejects.toThrow(/Only Rs 4,000 is left as savings/);
   });
 });
 

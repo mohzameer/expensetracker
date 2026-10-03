@@ -28,7 +28,7 @@ export function MoneyBand({
           <Figure label={`Left to spend in ${month}`} value={formatMoney(plan.leftToSpend, currency)} sub="unspent budgets" />
           <Op>=</Op>
           <Figure
-            label={`Free after ${month}`}
+            label={`Savings after ${month}`}
             value={formatMoney(plan.freeAfter, currency)}
             className={plan.freeAfter < 0 ? "text-bad" : "text-ok"}
             sub="if every budget is spent"
@@ -41,7 +41,7 @@ export function MoneyBand({
           <Figure label={`${month} budgets`} value={formatMoney(plan.budgets, currency)} />
           <Op>=</Op>
           <Figure
-            label={`Free after ${month}`}
+            label={`Savings after ${month}`}
             value={formatMoney(plan.freeAfter, currency)}
             className={plan.freeAfter < 0 ? "text-bad" : "text-ok"}
             sub="if every budget is spent"

@@ -409,7 +409,7 @@ export function SetupForm({ data }: { data: Data }) {
           <Stat label="Monthly commitments" value={formatMoney(totals.monthly, symbol)} />
           <Stat label="Total allocated" value={formatMoney(totals.allocated, symbol)} strong />
           {freeAfter !== null && (
-            <Stat label={`Free after ${monthName}`} value={formatMoney(freeAfter, symbol)} tone={freeAfter < 0 ? "bad" : "ok"} />
+            <Stat label={`Savings after ${monthName}`} value={formatMoney(freeAfter, symbol)} tone={freeAfter < 0 ? "bad" : "ok"} />
           )}
         </dl>
         {!readOnly && (

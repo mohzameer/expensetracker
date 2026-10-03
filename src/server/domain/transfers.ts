@@ -59,11 +59,14 @@ export async function moveToCategory(
       if (available < input.amount) {
         throw new UserError(`Only ${formatMoney(available)} is left in ${src?.name ?? "that category"}.`);
       }
-    } else {
+    } else if ((input.reason ?? "cover") === "manual") {
+      // Topping up a budget that still has room sets more money aside, so it can't exceed what's left as savings.
       await lockSavings(tx);
       const balance = await getSavingsBalance(tx, await monthOfDate(tx, input.todayStr));
-      if (balance < input.amount) throw new UserError(`Savings only has ${formatMoney(Math.max(balance, 0))} free.`);
+      if (balance < input.amount) throw new UserError(`Only ${formatMoney(Math.max(balance, 0))} is left as savings.`);
     }
+    // reason "cover" with no source category = raising this month's cap to fit an overspend.
+    // That money has already been spent, so there is nothing to check.
 
     const [row] = await tx
       .insert(transfers)
@@ -95,7 +98,7 @@ export async function adjustSavings(
     await lockSavings(tx);
     if (input.direction === "out") {
       const balance = await getSavingsBalance(tx, ym);
-      if (balance < input.amount) throw new UserError(`Savings only has ${formatMoney(Math.max(balance, 0))} free.`);
+      if (balance < input.amount) throw new UserError(`Only ${formatMoney(Math.max(balance, 0))} is left as savings.`);
     }
     const [row] = await tx
       .insert(transfers)

@@ -170,6 +170,8 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
                     </div>
                     <span className="text-xs text-muted-ink">
                       {formatAmount(s.spent)} of {formatAmount(s.effectiveAllocation)}
+                      {s.effectiveAllocation !== s.allocation &&
+                        ` · cap ${s.effectiveAllocation > s.allocation ? "raised" : "lowered"} from ${formatAmount(s.allocation)}`}
                     </span>
                   </div>
                 );

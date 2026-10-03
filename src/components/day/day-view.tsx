@@ -318,7 +318,6 @@ export function DayView({ data }: { data: DayData }) {
           onOpenChange={(open) => setCover((c) => ({ ...c, open }))}
           target={coverTarget}
           summaries={data.summaries}
-          savings={data.savings}
           currency={data.currency}
           ym={data.ym}
         />
