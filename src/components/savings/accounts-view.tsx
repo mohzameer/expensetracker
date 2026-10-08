@@ -50,15 +50,22 @@ export function AccountsView({ data, back }: { data: Data; back: string }) {
             Real balances. Expenses come out of the account that paid; adjust a balance when money comes in.
           </span>
         </div>
-        <div className="flex flex-col items-end gap-0.5">
-          <span className="text-[13px] text-muted-ink">Savings</span>
-          <span className={cn("font-display text-[40px] leading-tight font-semibold", data.free < 0 ? "text-bad" : "text-teal")}>
-            {formatMoney(data.free, data.currency)}
-          </span>
-          <span className="text-right text-[13px] text-muted-ink">
-            {formatMoney(total, data.currency)} in accounts − {formatMoney(data.leftToSpend, data.currency)} left to spend in{" "}
-            {formatMonth(data.ym, { month: "long" })}&apos;s budgets
-          </span>
+        <div className="flex w-full flex-col items-end gap-3 lg:ml-auto lg:w-auto lg:flex-row lg:gap-10">
+          <div className="flex flex-col items-end gap-0.5">
+            <span className="text-[13px] text-muted-ink">{formatMonth(data.ym, { month: "long" })} budgets</span>
+            <span className="font-display text-[26px] leading-tight font-semibold">{formatMoney(data.budgeted, data.currency)}</span>
+            <span className="text-right text-[13px] text-muted-ink">{formatMoney(data.spent, data.currency)} spent so far</span>
+          </div>
+          <div className="flex flex-col items-end gap-0.5">
+            <span className="text-[13px] text-muted-ink">Savings</span>
+            <span className={cn("font-display text-[40px] leading-tight font-semibold", data.free < 0 ? "text-bad" : "text-teal")}>
+              {formatMoney(data.free, data.currency)}
+            </span>
+            <span className="text-right text-[13px] text-muted-ink">
+              {formatMoney(total, data.currency)} in accounts − {formatMoney(data.leftToSpend, data.currency)} left to spend in{" "}
+              {formatMonth(data.ym, { month: "long" })}&apos;s budgets
+            </span>
+          </div>
         </div>
       </div>
 

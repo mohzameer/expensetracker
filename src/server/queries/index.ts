@@ -389,11 +389,12 @@ export async function getDashboard(db: Db, ym: string) {
 /** Accounts page: balances, free money, and every movement in or out of an account. */
 export async function getMoneyPage(db: Db) {
   const cur = await currentYm(db);
-  const [settings, accountList, free, committed, entries, incomeIn, spendDays] = await Promise.all([
+  const [settings, accountList, free, committed, summaries, entries, incomeIn, spendDays] = await Promise.all([
     getSettings(db),
     getAccounts(db),
     getSavingsBalance(db, cur),
     committedByMonth(db, cur),
+    getSummaries(db, await getMonth(db, cur)),
     db
       .select({ id: accountEntries.id, accountId: accountEntries.accountId, date: accountEntries.occurredOn, amount: accountEntries.amount, kind: accountEntries.kind, note: accountEntries.note })
       .from(accountEntries)
@@ -441,6 +442,9 @@ export async function getMoneyPage(db: Db) {
     defaultAccountId: settings.defaultAccountId,
     free,
     leftToSpend: committed.reduce((a, r) => a + Math.max(r.remaining, 0), 0),
+    // This month's budgets in total (every category's cap) and what has been spent from them.
+    budgeted: summaries.reduce((a, s) => a + s.effectiveAllocation, 0),
+    spent: summaries.reduce((a, s) => a + s.spent, 0),
     ledger,
   };
 }

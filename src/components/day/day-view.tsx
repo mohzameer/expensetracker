@@ -177,9 +177,7 @@ export function DayView({ data }: { data: DayData }) {
               aria-label="Open accounts"
               className="absolute top-1 left-1/2 flex size-10 items-center justify-center text-white lg:hidden"
             >
-              <span className="flex size-8 items-center justify-center rounded-full bg-white/15">
-                <Wallet aria-hidden className="size-[18px]" />
-              </span>
+              <Wallet aria-hidden className="size-5 opacity-30" />
             </Link>
           </div>
         )}
