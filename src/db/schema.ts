@@ -31,10 +31,10 @@ export const settings = pgTable(
     currencyCode: text().notNull().default("LKR"),
     currencySymbol: text().notNull().default("Rs"),
     defaultAlertPct: smallint().notNull().default(10),
-    // Every new month starts with this expected income line (e.g. salary), if set.
+    // Unused: new months no longer start with an income line. Kept so the table needs no migration.
     defaultIncomeSource: text().notNull().default("Salary"),
     defaultIncomeAmount: money(),
-    // Pre-selected "Paid from" account for new expenses, and where new months' default income goes.
+    // Pre-selected "Paid from" account for new expenses.
     defaultAccountId: uuid().references((): AnyPgColumn => accounts.id),
     // Day a budget month starts (e.g. 25 = salary day: "September" runs 25 Sep → 24 Oct). 1 = calendar months.
     periodStartDay: smallint().notNull().default(1),

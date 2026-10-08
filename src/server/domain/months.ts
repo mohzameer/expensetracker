@@ -91,14 +91,6 @@ export async function ensureMonth(db: Db, ym: string): Promise<Month> {
       );
     }
     await syncCaps(tx);
-    if (s.defaultIncomeAmount) {
-      await tx.insert(incomes).values({
-        monthId: month.id,
-        source: s.defaultIncomeSource,
-        amount: s.defaultIncomeAmount,
-        accountId: s.defaultAccountId,
-      });
-    }
     return month;
   });
 }

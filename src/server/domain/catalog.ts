@@ -148,9 +148,7 @@ export type SetupPayload = {
   categories: SetupCategory[];
   /** The month's expected income lines (replaces the expected ones; received lines are kept). Omit to leave income untouched. */
   incomes?: { source: string; amount: number; accountId: string | null }[];
-  /** Expected income every new month starts with; null amount turns it off. */
-  defaultIncome?: { source: string; amount: number | null };
-  /** "Paid from" default for new expenses and the account new months' income goes into. */
+  /** "Paid from" default for new expenses. */
   defaultAccountId?: string | null;
   /** Day budget months start on (1–28). Only months created afterwards use it. */
   periodStartDay?: number;
@@ -165,12 +163,6 @@ export async function saveSetup(db: Db, p: SetupPayload) {
     await tx.update(settings).set({ currencySymbol: p.currencySymbol, currencyCode: p.currencyCode }).where(eq(settings.id, 1));
     await tx.update(months).set({ defaultAlertPct: p.defaultAlertPct }).where(eq(months.id, month.id));
 
-    if (p.defaultIncome) {
-      await tx
-        .update(settings)
-        .set({ defaultIncomeSource: p.defaultIncome.source.trim() || "Salary", defaultIncomeAmount: p.defaultIncome.amount })
-        .where(eq(settings.id, 1));
-    }
     if (p.periodStartDay !== undefined) {
       await tx.update(settings).set({ periodStartDay: p.periodStartDay }).where(eq(settings.id, 1));
     }

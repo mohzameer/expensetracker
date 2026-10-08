@@ -101,5 +101,4 @@ export const setupInput = z.object({
     .optional(),
   defaultAccountId: id.nullable().optional(),
   periodStartDay: z.number().int().min(1).max(28).optional(),
-  defaultIncome: z.object({ source: z.string().trim().max(60), amount: optionalAmount }).optional(),
 });

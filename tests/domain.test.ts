@@ -316,10 +316,10 @@ describe("setup", () => {
 
 describe("income", () => {
   // Income lands in an account; these tests use one empty ComBank account.
-  const setup = async (ym: string, incomesList: { source: string; amount: number }[], defaultIncome?: { source: string; amount: number | null }) => {
+  const setup = async (ym: string, incomesList: { source: string; amount: number }[]) => {
     const acct = (await getAccounts(db))[0] ?? (await createAccount(db, { name: "ComBank", opening: 0, todayStr: "2026-09-01" }));
     return saveSetup(db, {
-      ym, defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR", categories: [], defaultIncome,
+      ym, defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR", categories: [],
       incomes: incomesList.map((i) => ({ ...i, accountId: acct.id })),
     });
   };
@@ -328,11 +328,12 @@ describe("income", () => {
     return db.select().from(incomes).where(eq(incomes.monthId, m.id));
   };
 
-  it("new months start with the default income only, nothing copied", async () => {
+  it("new months start with no income lines, nothing copied", async () => {
     await seedSeptember(db);
-    await setup("2026-09", [{ source: "Insurance claim", amount: rs(300000) }], { source: "Salary", amount: rs(1089000) });
+    await setup("2026-09", [{ source: "Insurance claim", amount: rs(300000) }]);
+    await db.update(settings).set({ defaultIncomeAmount: rs(1089000) }).where(eq(settings.id, 1));
     await ensureMonth(db, "2026-10");
-    expect((await lines("2026-10")).map((r) => [r.source, r.amount, r.status])).toEqual([["Salary", rs(1089000), "expected"]]);
+    expect(await lines("2026-10")).toEqual([]);
   });
 
   it("counts toward free money only once received, and can be undone", async () => {
