@@ -22,7 +22,8 @@ type Data = Awaited<ReturnType<typeof getMoneyPage>>;
 type Account = Data["accounts"][number];
 type Open = { kind: "add" } | { kind: "balance"; account: Account } | { kind: "transfer"; fromId?: string } | null;
 
-export function AccountsView({ data }: { data: Data }) {
+/** Balances and adjustments. On a phone it opens from the day view's banner; the X goes back. */
+export function AccountsView({ data, back }: { data: Data; back: string }) {
   const [open, setOpen] = useState<Open>(null);
   const [key, setKey] = useState(0);
   const [filter, setFilter] = useState<string>("all");
@@ -38,10 +39,15 @@ export function AccountsView({ data }: { data: Data }) {
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-[22px] px-4 py-6 lg:px-9 lg:py-7">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex flex-col gap-1.5">
-          <h1 className="font-display text-3xl font-semibold">Accounts</h1>
+        <div className="flex w-full flex-col gap-1.5 lg:w-auto">
+          <div className="flex items-center justify-between gap-2">
+            <h1 className="font-display text-3xl font-semibold">Accounts</h1>
+            <Link href={back} aria-label="Close accounts" className="flex size-11 items-center justify-center rounded-full border border-line bg-surface lg:hidden">
+              <X className="size-5" />
+            </Link>
+          </div>
           <span className="text-sm text-muted-ink">
-            Real balances. Expenses come out of the account that paid; income goes into its account when received.
+            Real balances. Expenses come out of the account that paid; adjust a balance when money comes in.
           </span>
         </div>
         <div className="flex flex-col items-end gap-0.5">
@@ -103,7 +109,7 @@ export function AccountsView({ data }: { data: Data }) {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-[17px] font-semibold">Movements</h2>
           <div className="flex flex-wrap gap-2">
-            <Link href="/charts?from=/savings" className="flex min-h-10 items-center gap-1.5 rounded-[10px] border border-line-strong px-3.5 text-sm font-medium">
+            <Link href={`/charts?from=${encodeURIComponent(`/savings?from=${encodeURIComponent(back)}`)}`} className="flex min-h-10 items-center gap-1.5 rounded-[10px] border border-line-strong px-3.5 text-sm font-medium">
               <BarChart3 aria-hidden className="size-4" /> Spending charts
             </Link>
           </div>
