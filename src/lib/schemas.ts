@@ -78,6 +78,8 @@ const setupItem = z.object({
   defaultAmount: optionalAmount,
   /** Monthly items only: leave it out of this month (no cap, not due). */
   skipped: z.boolean().default(false),
+  /** Monthly items only: the last month it counts in; null = until stopped. */
+  endYm: yearMonth.nullable().default(null),
   removed: z.boolean(),
 });
 

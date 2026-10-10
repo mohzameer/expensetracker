@@ -149,6 +149,8 @@ export const items = pgTable(
     defaultAmount: money(), // one-off prefill
     // One-off items belong to the month they were added for; monthly items (null) carry into every month.
     monthId: uuid().references(() => months.id),
+    // Monthly items only: the last budget month ("YYYY-MM") it counts in; null = until stopped.
+    endYm: char({ length: 7 }),
     sortOrder: integer().notNull().default(0),
     archivedAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
@@ -168,6 +170,7 @@ export const items = pgTable(
     check("items_monthly_expected", sql`kind <> 'monthly' or expected_amount is not null`),
     check("items_expected_positive", sql`expected_amount is null or expected_amount > 0`),
     check("items_default_positive", sql`default_amount is null or default_amount > 0`),
+    check("items_end_ym", sql`end_ym is null or (kind = 'monthly' and end_ym ~ '^[0-9]{4}-(0[1-9]|1[0-2])$')`),
   ],
 );
 

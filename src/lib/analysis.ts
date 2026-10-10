@@ -25,6 +25,8 @@ export type ItemRef = {
   createdOn: string;
   /** Budget months a monthly item was left out of (Setup's "Skip"). */
   skippedIn: string[];
+  /** The last budget month a monthly item counts in; null = until stopped. */
+  endYm: string | null;
 };
 
 export type CategoryRef = { id: string; name: string; color: string; archived?: boolean };
@@ -147,8 +149,10 @@ function cycleItems(items: ItemRef[], categories: CategoryRef[], ym: string, sta
   items.forEach((it, order) => {
     if (it.kind === "one_off" && it.ym !== ym) return;
     const key = itemKey(it.categoryId, it.name);
-    const skipped = it.kind === "monthly" && it.skippedIn.includes(ym);
-    const amount = skipped ? null : it.kind === "monthly" ? it.expectedAmount : it.defaultAmount;
+    // A monthly item past its last month plans nothing; it only shows if it was still paid.
+    const ended = it.kind === "monthly" && it.endYm != null && it.endYm < ym;
+    const skipped = it.kind === "monthly" && !ended && it.skippedIn.includes(ym);
+    const amount = skipped || ended ? null : it.kind === "monthly" ? it.expectedAmount : it.defaultAmount;
     const listable = (amount != null || skipped) && !it.archived && live.has(it.categoryId) && (it.kind === "one_off" || it.createdOn < end);
     const cur = out.get(key);
     if (cur) {

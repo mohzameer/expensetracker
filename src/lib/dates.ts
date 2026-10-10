@@ -42,6 +42,13 @@ export function addMonths(ym: string, n: number): string {
   return iso(d).slice(0, 7);
 }
 
+/** Whole months from `b` to `a` ("2026-11" − "2026-09" = 2). */
+export function diffMonths(a: string, b: string): number {
+  const [ay, am] = a.split("-").map(Number);
+  const [by, bm] = b.split("-").map(Number);
+  return (ay - by) * 12 + (am - bm);
+}
+
 export function firstDay(ym: string): string {
   return `${ym}-01`;
 }

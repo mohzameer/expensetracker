@@ -6,14 +6,24 @@ import { Archive, CalendarOff, Lock, Plus, Undo2, X } from "lucide-react";
 import { MonthHeader } from "@/components/page-header";
 import { saveSetupAction } from "@/server/actions";
 import type { getSetupPage } from "@/server/queries";
-import { formatMonth } from "@/lib/dates";
+import { addMonths, diffMonths, formatMonth } from "@/lib/dates";
 import { formatAmount, formatMoney, parseMoney, toInputValue } from "@/lib/money";
 import { CATEGORY_COLORS } from "@/lib/palette";
 import { cn } from "@/lib/utils";
 
 type Data = Awaited<ReturnType<typeof getSetupPage>>;
 type Kind = "monthly" | "one_off";
-type ItemState = { key: string; id: string | null; name: string; kind: Kind; amount: string; skipped: boolean; removed: boolean };
+type ItemState = {
+  key: string;
+  id: string | null;
+  name: string;
+  kind: Kind;
+  amount: string;
+  skipped: boolean;
+  /** Monthly items: the last month it counts in; null = until I stop. */
+  endYm: string | null;
+  removed: boolean;
+};
 type CatState = {
   key: string;
   id: string | null;
@@ -53,6 +63,7 @@ function initialState(data: Data): CatState[] {
       kind: i.kind,
       amount: toInputValue(i.kind === "monthly" ? i.expectedAmount : i.defaultAmount),
       skipped: i.skipped,
+      endYm: i.endYm,
       removed: false,
     })),
   }));
@@ -73,6 +84,8 @@ export function SetupForm({ data }: { data: Data }) {
   const [defaultAccount, setDefaultAccount] = useState(data.defaultAccountId ?? "");
   const [startDay, setStartDay] = useState(String(data.periodStartDay));
   const [pending, start] = useTransition();
+  // The row whose "For how long?" strip is open. Kept out of the form state: opening it changes nothing.
+  const [asking, setAsking] = useState<string | null>(null);
 
   const closed = data.month?.status === "closed";
   const missing = !data.month;
@@ -167,6 +180,7 @@ export function SetupForm({ data }: { data: Data }) {
                 expectedAmount: i.kind === "monthly" ? amt : null,
                 defaultAmount: i.kind === "one_off" ? amt : null,
                 skipped: i.kind === "monthly" && i.skipped,
+                endYm: i.kind === "monthly" ? i.endYm : null,
                 removed: i.removed,
               };
             }),
@@ -346,7 +360,12 @@ export function SetupForm({ data }: { data: Data }) {
                         aria-label={`Kind of ${i.name || "item"}`}
                         value={i.kind}
                         disabled={i.removed}
-                        onChange={(e) => updateItem(c.key, i.key, { kind: e.target.value as Kind })}
+                        onChange={(e) => {
+                          // Becoming monthly starts as "until I stop" and asks how long.
+                          const kind = e.target.value as Kind;
+                          updateItem(c.key, i.key, { kind, endYm: null });
+                          setAsking(kind === "monthly" ? i.key : null);
+                        }}
                         className={cn(field, i.removed && "opacity-50")}
                       >
                         <option value="one_off">One-off</option>
@@ -411,18 +430,46 @@ export function SetupForm({ data }: { data: Data }) {
                     ) : i.kind === "monthly" && i.skipped ? (
                       <span className="pl-2.5 text-xs font-medium text-warn">Skipped for {monthName} — back next month. Tap the calendar to include it again.</span>
                     ) : null}
-                    {/* Last month's actual spend on this item; hidden when there was none. */}
-                    {i.id && data.prevSpentByItem[i.id] ? (
-                      <span className="pl-2.5 text-xs text-muted-ink">
-                        {formatMonth(data.prevYm, { month: "long" })}: spent {formatAmount(data.prevSpentByItem[i.id])}
-                      </span>
-                    ) : null}
+                    {/* How long a monthly item runs, with last month's actual spend alongside (when there was any). */}
+                    {i.kind === "monthly" && !i.removed && asking === i.key && !readOnly ? (
+                      <DurationStrip
+                        ym={data.ym}
+                        endYm={i.endYm}
+                        canStop={!!i.id}
+                        onChange={(endYm) => updateItem(c.key, i.key, { endYm })}
+                        onClose={() => setAsking(null)}
+                      />
+                    ) : (
+                      (i.kind === "monthly" && !i.removed) || (i.id && data.prevSpentByItem[i.id]) ? (
+                        <span className="pl-2.5 text-xs text-muted-ink">
+                          {i.kind === "monthly" && !i.removed && (
+                            <>
+                              {describeDuration(i.endYm, data.ym)}
+                              {!readOnly && (
+                                <>
+                                  {" · "}
+                                  <button type="button" onClick={() => setAsking(i.key)} className="font-semibold text-teal hover:underline">
+                                    Change
+                                  </button>
+                                </>
+                              )}
+                            </>
+                          )}
+                          {i.id && data.prevSpentByItem[i.id] ? (
+                            <>
+                              {i.kind === "monthly" && !i.removed && " · "}
+                              {formatMonth(data.prevYm, { month: "long" })}: spent {formatAmount(data.prevSpentByItem[i.id])}
+                            </>
+                          ) : null}
+                        </span>
+                      ) : null
+                    )}
                     </div>
                   ))}
                   <button
                     type="button"
                     onClick={() =>
-                      updateCat(c.key, { items: [...c.items, { key: newKey(), id: null, name: "", kind: "one_off", amount: "", skipped: false, removed: false }] })
+                      updateCat(c.key, { items: [...c.items, { key: newKey(), id: null, name: "", kind: "one_off", amount: "", skipped: false, endYm: null, removed: false }] })
                     }
                     className="flex min-h-10 items-center gap-1.5 self-start rounded-[10px] px-2.5 text-sm font-semibold text-teal hover:bg-teal-wash"
                   >
@@ -492,6 +539,81 @@ export function SetupForm({ data }: { data: Data }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** "Until I stop", "3 months, last is Nov 2026" or "Stops after September", counted from the month in view. */
+function describeDuration(endYm: string | null, ym: string) {
+  if (!endYm) return "Until I stop";
+  const n = diffMonths(endYm, ym) + 1;
+  return n <= 1 ? `Stops after ${formatMonth(ym, { month: "long" })}` : `${n} months, last is ${formatMonth(endYm, { month: "short", year: "numeric" })}`;
+}
+
+const PRESETS = [3, 6, 12];
+
+/** Asks how long a monthly item runs, counted from the month in view: 3 / 6 / 12 months, until stopped, or any number. */
+function DurationStrip({
+  ym,
+  endYm,
+  canStop,
+  onChange,
+  onClose,
+}: {
+  ym: string;
+  endYm: string | null;
+  /** Only an item that already exists can be stopped after this month. */
+  canStop: boolean;
+  onChange: (endYm: string | null) => void;
+  onClose: () => void;
+}) {
+  const months = endYm ? diffMonths(endYm, ym) + 1 : null;
+  // A typed number stays in the box even when it matches a preset.
+  const [typed, setTyped] = useState(months != null && months > 1 && !PRESETS.includes(months) ? String(months) : "");
+  const pick = (n: number | null) => {
+    setTyped("");
+    onChange(n == null ? null : addMonths(ym, n - 1));
+    onClose();
+  };
+  const chip = (on: boolean) =>
+    cn("min-h-9 rounded-full border px-3 text-[13px] font-semibold", on ? "border-ink bg-ink text-white" : "border-line-strong bg-surface text-ink-soft hover:border-ink");
+  const monthName = formatMonth(ym, { month: "long" });
+
+  return (
+    <div role="group" aria-label="For how long?" className="ml-2.5 flex flex-wrap items-center gap-1.5 rounded-xl bg-paper px-2.5 py-2">
+      <span className="pr-1 text-xs font-semibold text-muted-ink">For how long?</span>
+      {PRESETS.map((n) => (
+        <button key={n} type="button" aria-pressed={!typed && months === n} onClick={() => pick(n)} className={chip(!typed && months === n)}>
+          {n} months
+        </button>
+      ))}
+      <button type="button" aria-pressed={!typed && months === null} onClick={() => pick(null)} className={chip(!typed && months === null)}>
+        Until I stop
+      </button>
+      <label className="flex items-center gap-1.5 text-[13px] text-muted-ink">
+        <input
+          aria-label="Number of months"
+          inputMode="numeric"
+          placeholder="—"
+          value={typed}
+          onChange={(e) => {
+            const n = Math.min(Number(e.target.value.replace(/\D/g, "").slice(0, 3)), 120); // ten years at most
+            setTyped(n >= 1 ? String(n) : "");
+            onChange(n >= 1 ? addMonths(ym, n - 1) : null);
+          }}
+          onKeyDown={(e) => e.key === "Enter" && onClose()}
+          className={cn(field, "w-14 px-1.5 text-center", typed && "border-ink")}
+        />
+        months
+      </label>
+      {canStop && (
+        <button type="button" aria-pressed={!typed && months === 1} onClick={() => pick(1)} className={chip(!typed && months === 1)}>
+          Stop after {monthName}
+        </button>
+      )}
+      <button type="button" onClick={onClose} className="min-h-9 px-2 text-[13px] font-semibold text-teal hover:underline">
+        Done
+      </button>
     </div>
   );
 }

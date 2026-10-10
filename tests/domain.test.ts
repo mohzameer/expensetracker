@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { categoryBudgets, categoryMonthSummary, expenses, incomes, monthlyItemStatus, months, settings } from "@/db/schema";
+import { categoryBudgets, categoryMonthSummary, expenses, incomes, items, monthlyItemStatus, months, settings } from "@/db/schema";
 import { closeBlockers, closeMonth, ensureMonth, getMonth, monthOfDate } from "@/server/domain/months";
 import { getSavingsBalance, moveToCategory } from "@/server/domain/transfers";
 import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
@@ -414,6 +414,94 @@ describe("skipping a monthly item for one month", () => {
     expect(await cap("2026-09", s.dining.id)).toBe(rs(12000));
     await ensureMonth(db, "2026-10");
     expect(await cap("2026-10", s.dining.id)).toBe(rs(14000));
+  });
+});
+
+describe("how long a monthly item runs", () => {
+  const cap = async (ym: string, categoryId: string) => (await summary(ym, categoryId)).allocation;
+  const dueNames = async (ym: string) => (await getMonthlyItems(db, (await getMonth(db, ym))!)).map((d) => d.name);
+  const offered = async (ym: string) => (await itemsForMonth(db, (await getMonth(db, ym))!.id)).map((i) => i.name);
+  const internet = (s: Awaited<ReturnType<typeof seedSeptember>>, extra: Record<string, unknown>) =>
+    ({ id: s.internet.id, name: "Internet", kind: "monthly" as const, expectedAmount: rs(3990), defaultAmount: null, removed: false, ...extra });
+  const setup = (s: Awaited<ReturnType<typeof seedSeptember>>, ym: string, item: ReturnType<typeof internet>) =>
+    saveSetup(db, {
+      ym, defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
+      categories: [{ id: s.utilities.id, name: "Utilities", color: "#00897B", alertPct: null, removed: false, items: [item] }],
+    });
+
+  it("counts for its months only: caps, Due list and the items offered", async () => {
+    const s = await seedSeptember(db);
+    for (const ym of ["2026-10", "2026-11", "2026-12"]) await ensureMonth(db, ym);
+    await setup(s, "2026-09", internet(s, { endYm: "2026-11" })); // 3 months from September
+    for (const ym of ["2026-09", "2026-10", "2026-11"]) {
+      expect(await cap(ym, s.utilities.id)).toBe(rs(18000));
+      expect(await offered(ym)).toContain("Internet");
+    }
+    expect(await dueNames("2026-11")).toContain("Internet");
+    expect(await cap("2026-12", s.utilities.id)).toBe(rs(14010));
+    expect(await dueNames("2026-12")).not.toContain("Internet");
+    expect(await offered("2026-12")).not.toContain("Internet");
+    // A month created afterwards leaves it out too.
+    await ensureMonth(db, "2027-01");
+    expect(await cap("2027-01", s.utilities.id)).toBe(rs(14010));
+  });
+
+  it("stop after this month keeps this month and drops the next; until I stop brings it back", async () => {
+    const s = await seedSeptember(db);
+    await ensureMonth(db, "2026-10");
+    await setup(s, "2026-09", internet(s, { endYm: "2026-09" }));
+    expect(await cap("2026-09", s.utilities.id)).toBe(rs(18000));
+    expect(await dueNames("2026-09")).toContain("Internet");
+    expect(await cap("2026-10", s.utilities.id)).toBe(rs(14010));
+
+    await setup(s, "2026-09", internet(s, { endYm: null }));
+    expect(await cap("2026-10", s.utilities.id)).toBe(rs(18000));
+    // Leaving the field out of a save changes nothing.
+    await setup(s, "2026-09", internet(s, { endYm: "2026-09" }));
+    await setup(s, "2026-09", internet(s, {}));
+    expect(await cap("2026-10", s.utilities.id)).toBe(rs(14010));
+  });
+
+  it("can't stop before the month being saved, and a one-off never has an end", async () => {
+    const s = await seedSeptember(db);
+    await ensureMonth(db, "2026-10");
+    await expect(setup(s, "2026-10", internet(s, { endYm: "2026-09" }))).rejects.toThrow(/can't stop before October/);
+    await setup(s, "2026-09", internet(s, { endYm: "2026-11" }));
+    await setup(s, "2026-09", { ...internet(s, { endYm: "2026-11" }), kind: "one_off" as never, expectedAmount: null, defaultAmount: rs(3990) } as never);
+    const [row] = await db.select().from(items).where(eq(items.id, s.internet.id));
+    expect([row.kind, row.endYm]).toEqual(["one_off", null]);
+  });
+
+  it("leaves closed months as they closed", async () => {
+    const s = await seedSeptember(db);
+    await closeMonth(db, "2026-09", "2026-10-01");
+    await ensureMonth(db, "2026-10");
+    await ensureMonth(db, "2026-11");
+    await setup(s, "2026-10", internet(s, { endYm: "2026-10" }));
+    expect(await cap("2026-09", s.utilities.id)).toBe(rs(18000));
+    expect(await cap("2026-11", s.utilities.id)).toBe(rs(14010));
+  });
+
+  it("adding an ended item's name again restarts it, without filling the months in between", async () => {
+    const s = await seedSeptember(db);
+    for (const ym of ["2026-10", "2026-11"]) await ensureMonth(db, ym);
+    await setup(s, "2026-09", internet(s, { endYm: "2026-09" }));
+    // November: the same name is added as a new monthly item, for 2 months.
+    await saveSetup(db, {
+      ym: "2026-11", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
+      categories: [{ id: s.utilities.id, name: "Utilities", color: "#00897B", alertPct: null, removed: false,
+        items: [{ id: null, name: "internet", kind: "monthly", expectedAmount: rs(5000), defaultAmount: null, endYm: "2026-12", removed: false }] }],
+    });
+    const rows = await db.select().from(items).where(eq(items.categoryId, s.utilities.id));
+    expect(rows.filter((r) => r.name.toLowerCase() === "internet")).toHaveLength(1);
+    expect(await cap("2026-10", s.utilities.id)).toBe(rs(14010)); // the gap stays empty
+    expect(await cap("2026-11", s.utilities.id)).toBe(rs(14010 + 5000));
+    // From the expense sheet it restarts as "until I stop".
+    await setup(s, "2026-11", { ...internet(s, { endYm: "2026-11" }), expectedAmount: rs(5000) });
+    await ensureMonth(db, "2027-01");
+    const again = await createItem(db, { categoryId: s.utilities.id, name: "Internet", kind: "monthly", expectedAmount: rs(6000), ym: "2027-01" });
+    expect([again.id, again.endYm]).toEqual([s.internet.id, null]);
+    expect(await cap("2027-01", s.utilities.id)).toBe(rs(14010 + 6000));
   });
 });
 

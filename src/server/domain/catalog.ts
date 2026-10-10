@@ -1,6 +1,7 @@
-import { and, asc, eq, isNull, max, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, lt, max, or, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { categories, categoryBudgets, expenses, incomes, items, itemSkips, months, settings, transfers } from "@/db/schema";
+import { formatMonth } from "@/lib/dates";
 import { UserError } from "@/lib/errors";
 import { CATEGORY_COLORS } from "@/lib/palette";
 import { syncCaps } from "./caps";
@@ -40,8 +41,11 @@ export type NewItem = {
   ym: string;
 };
 
-/** Items offered in a month: every monthly item, plus the one-offs added for that month. */
+/** Items offered in a month: the monthly items still running in it, plus the one-offs added for that month. */
 export async function itemsForMonth(db: Db, monthId: string | null) {
+  const running = monthId
+    ? and(eq(items.kind, "monthly"), or(isNull(items.endYm), sql`${items.endYm} >= (select year_month from months where id = ${monthId})`))
+    : eq(items.kind, "monthly");
   return db
     .select({
       id: items.id,
@@ -50,19 +54,42 @@ export async function itemsForMonth(db: Db, monthId: string | null) {
       kind: items.kind,
       expectedAmount: items.expectedAmount,
       defaultAmount: items.defaultAmount,
+      endYm: items.endYm,
     })
     .from(items)
-    .where(
-      and(
-        isNull(items.archivedAt),
-        monthId ? or(eq(items.kind, "monthly"), eq(items.monthId, monthId)) : eq(items.kind, "monthly"),
-      ),
-    )
+    .where(and(isNull(items.archivedAt), monthId ? or(running, eq(items.monthId, monthId)) : running))
     .orderBy(asc(items.sortOrder), asc(items.name));
+}
+
+/**
+ * A monthly item that already ran its course can be added again under the same name:
+ * names are unique per category, so the ended item is restarted rather than duplicated.
+ * The open months between its old end and `ym` are marked skipped, so restarting
+ * doesn't put it back into them. Returns its id, or null when there is nothing to restart.
+ */
+async function restartEnded(db: Db, categoryId: string, name: string, ym: string): Promise<string | null> {
+  const [ended] = await db
+    .select({ id: items.id, endYm: items.endYm })
+    .from(items)
+    .where(
+      and(eq(items.categoryId, categoryId), eq(items.kind, "monthly"), isNull(items.archivedAt), sql`lower(${items.name}) = ${name.trim().toLowerCase()}`, lt(items.endYm, ym)),
+    );
+  if (!ended) return null;
+  const gap = await db.select({ id: months.id }).from(months).where(and(gt(months.yearMonth, ended.endYm!), lt(months.yearMonth, ym), eq(months.status, "open")));
+  if (gap.length) await db.insert(itemSkips).values(gap.map((m) => ({ itemId: ended.id, monthId: m.id }))).onConflictDoNothing();
+  return ended.id;
 }
 
 export async function createItem(db: Db, input: NewItem) {
   if (input.kind === "monthly" && !input.expectedAmount) throw new UserError("Monthly items need an expected amount.");
+  if (input.kind === "monthly") {
+    const restarted = await restartEnded(db, input.categoryId, input.name, input.ym);
+    if (restarted) {
+      const [item] = await db.update(items).set({ expectedAmount: input.expectedAmount, endYm: null }).where(eq(items.id, restarted)).returning();
+      await syncCaps(db, input.categoryId);
+      return item;
+    }
+  }
   const monthId = input.kind === "one_off" ? (await ensureMonth(db, input.ym)).id : null;
   const [{ top }] = await db.select({ top: max(items.sortOrder) }).from(items).where(eq(items.categoryId, input.categoryId));
   const [item] = await db
@@ -128,6 +155,8 @@ export type SetupItem = {
   defaultAmount: number | null;
   /** Monthly items only: leave it out of this month (no cap, not due). */
   skipped?: boolean;
+  /** Monthly items only: the last month it counts in; null = until stopped. Left as it is when omitted. */
+  endYm?: string | null;
   removed: boolean;
 };
 
@@ -225,9 +254,15 @@ export async function saveSetup(db: Db, p: SetupPayload) {
           defaultAmount: it.kind === "one_off" ? it.defaultAmount : null,
           // One-offs belong to this month; switching an item to monthly makes it carry over.
           monthId: it.kind === "one_off" ? month.id : null,
+          // How long a monthly item runs. A one-off never has an end month.
+          ...(it.kind === "one_off" ? { endYm: null } : it.endYm !== undefined ? { endYm: it.endYm } : {}),
           sortOrder: itemOrder++,
         };
+        if (it.kind === "monthly" && it.endYm && it.endYm < p.ym) {
+          throw new UserError(`${it.name}: it can't stop before ${formatMonth(p.ym, { month: "long" })}.`);
+        }
         let itemId = it.id;
+        if (!itemId && it.kind === "monthly") itemId = await restartEnded(tx, categoryId, it.name, p.ym);
         if (itemId) await tx.update(items).set(values).where(and(eq(items.id, itemId), eq(items.categoryId, categoryId)));
         else [{ id: itemId }] = await tx.insert(items).values({ ...values, categoryId }).returning({ id: items.id });
         // Skipping is per month and only means something for a monthly item.

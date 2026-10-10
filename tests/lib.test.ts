@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatAmount, formatMoney, parseMoney, toInputValue } from "@/lib/money";
 import { budgetState, stateAfter } from "@/lib/budget";
-import { addDays, addMonths, clampToMonth, isIsoDate, lastDay, relativeDay, today } from "@/lib/dates";
+import { addDays, addMonths, clampToMonth, diffMonths, isIsoDate, lastDay, relativeDay, today } from "@/lib/dates";
 import { cycleGrid, groupByDay, inRange, itemKey, monthBuckets, monthOfRange, presetRange, rangeBars, rowKey, searchRows, topItems, type ItemRef, type Row, type Search } from "@/lib/analysis";
 
 describe("money", () => {
@@ -78,7 +78,7 @@ describe("analysis", () => {
     extra: Partial<ItemRef> = {},
   ): ItemRef => ({
     categoryId, name, kind, expectedAmount: kind === "monthly" ? amount : null, defaultAmount: kind === "one_off" ? amount : null,
-    ym, archived: false, createdOn: "2026-01-01", skippedIn: [], ...extra,
+    ym, archived: false, createdOn: "2026-01-01", skippedIn: [], endYm: null, ...extra,
   });
 
   it("identifies an item by category and name, so one-offs join up across months", () => {
@@ -175,6 +175,11 @@ describe("analysis", () => {
     expect(grid.categories[1].items).toEqual([
       { key: "ride:uber", name: "Uber", kind: "one_off", skipped: false, paidOn: ["2026-09-28", "2026-10-01"], planned: 1250, spent: 2000 },
     ]);
+    // An item past its last month plans nothing afterwards, in the grid or in Top items.
+    const ended = [...items, item("food", "Lease", "monthly", 9000, null, { endYm: "2026-09" })];
+    expect(cycleGrid([], ended, cats, "2026-09", 25).categories[0].items.map((i) => i.name)).toContain("Lease");
+    expect(cycleGrid([], ended, cats, "2026-10", 25).categories[0].items.map((i) => i.name)).not.toContain("Lease");
+    expect(topItems([], ended, cats, "2026-10", 25).map((t) => t.name)).not.toContain("Lease");
     // Skipping is per month: Gas is planned again in October, and Top items leaves a skipped, unspent item out.
     expect(cycleGrid([], items, cats, "2026-10", 25).categories[0].items.find((i) => i.name === "Gas")).toMatchObject({ skipped: false, planned: 3000 });
     expect(topItems([], items, cats, "2026-09", 25).map((t) => t.name)).not.toContain("Gas");
@@ -196,5 +201,14 @@ describe("analysis", () => {
     expect(find({ q: "rides" })).toEqual([100]);
     expect(find({ accountId: "none" })).toEqual([200]);
     expect(find({ categoryId: "ride", accountId: "bank" })).toEqual([100]);
+  });
+});
+
+describe("month arithmetic", () => {
+  it("counts whole months between two budget months", () => {
+    expect(diffMonths("2026-11", "2026-09")).toBe(2);
+    expect(diffMonths("2026-09", "2026-09")).toBe(0);
+    expect(diffMonths("2027-02", "2026-11")).toBe(3);
+    expect(diffMonths(addMonths("2026-09", 11), "2026-09")).toBe(11);
   });
 });

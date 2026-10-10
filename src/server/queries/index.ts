@@ -32,6 +32,8 @@ export type CatalogItem = {
   kind: "monthly" | "one_off";
   expectedAmount: number | null;
   defaultAmount: number | null;
+  /** Monthly items: the last month it counts in; null = until stopped. */
+  endYm: string | null;
 };
 
 export type DueItem = {
@@ -509,6 +511,7 @@ export async function getAnalysis(db: Db) {
         kind: items.kind,
         expectedAmount: items.expectedAmount,
         defaultAmount: items.defaultAmount,
+        endYm: items.endYm,
         ym: months.yearMonth,
         archivedAt: items.archivedAt,
         createdAt: items.createdAt,
@@ -638,7 +641,7 @@ export async function getSetupPage(db: Db, ym: string) {
       alertPct: byCat.get(c.id)?.alertPct ?? null,
       items: catalog.items
         .filter((i) => i.categoryId === c.id)
-        .map((i) => ({ id: i.id, name: i.name, kind: i.kind, expectedAmount: i.expectedAmount, defaultAmount: i.defaultAmount, skipped: skipped.has(i.id) })),
+        .map((i) => ({ id: i.id, name: i.name, kind: i.kind, expectedAmount: i.expectedAmount, defaultAmount: i.defaultAmount, skipped: skipped.has(i.id), endYm: i.endYm })),
     })),
   };
 }
