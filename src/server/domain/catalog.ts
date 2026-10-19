@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, isNull, lt, max, or, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { categories, categoryBudgets, expenses, incomes, items, itemSkips, months, settings, transfers } from "@/db/schema";
+import { type ItemKind, categories, categoryBudgets, expenses, incomes, items, itemSkips, months, settings, transfers } from "@/db/schema";
 import { formatMonth } from "@/lib/dates";
 import { UserError } from "@/lib/errors";
 import { CATEGORY_COLORS } from "@/lib/palette";
@@ -34,18 +34,19 @@ export async function createCategory(db: Db, input: NewCategory) {
 export type NewItem = {
   categoryId: string;
   name: string;
-  kind: "monthly" | "one_off";
+  kind: ItemKind;
   expectedAmount?: number | null;
   defaultAmount?: number | null;
-  /** The month a one-off item is for (it won't appear in other months). */
+  /** The month a one-off item is for (it won't appear in other months). An as-needed item's defaultAmount is only its usual amount. */
   ym: string;
 };
 
-/** Items offered in a month: the monthly items still running in it, plus the one-offs added for that month. */
+/** Items offered in a month: the monthly items still running in it, every as-needed item, and the one-offs added for that month. */
 export async function itemsForMonth(db: Db, monthId: string | null) {
-  const running = monthId
+  const monthly = monthId
     ? and(eq(items.kind, "monthly"), or(isNull(items.endYm), sql`${items.endYm} >= (select year_month from months where id = ${monthId})`))
     : eq(items.kind, "monthly");
+  const running = or(monthly, eq(items.kind, "as_needed"));
   return db
     .select({
       id: items.id,
@@ -99,7 +100,7 @@ export async function createItem(db: Db, input: NewItem) {
       name: input.name.trim(),
       kind: input.kind,
       expectedAmount: input.kind === "monthly" ? input.expectedAmount : null,
-      defaultAmount: input.kind === "one_off" ? (input.defaultAmount ?? null) : null,
+      defaultAmount: input.kind !== "monthly" ? (input.defaultAmount ?? null) : null,
       monthId,
       sortOrder: (top ?? -1) + 1,
     })
@@ -150,7 +151,7 @@ export async function removeCategory(db: Db, id: string) {
 export type SetupItem = {
   id: string | null;
   name: string;
-  kind: "monthly" | "one_off";
+  kind: ItemKind;
   expectedAmount: number | null;
   defaultAmount: number | null;
   /** Monthly items only: leave it out of this month (no cap, not due). */
@@ -251,11 +252,11 @@ export async function saveSetup(db: Db, p: SetupPayload) {
           name: it.name.trim(),
           kind: it.kind,
           expectedAmount: it.kind === "monthly" ? it.expectedAmount : null,
-          defaultAmount: it.kind === "one_off" ? it.defaultAmount : null,
-          // One-offs belong to this month; switching an item to monthly makes it carry over.
+          defaultAmount: it.kind !== "monthly" ? it.defaultAmount : null,
+          // One-offs belong to this month; switching an item to monthly or as-needed makes it carry over.
           monthId: it.kind === "one_off" ? month.id : null,
-          // How long a monthly item runs. A one-off never has an end month.
-          ...(it.kind === "one_off" ? { endYm: null } : it.endYm !== undefined ? { endYm: it.endYm } : {}),
+          // How long a monthly item runs. Other kinds never have an end month.
+          ...(it.kind !== "monthly" ? { endYm: null } : it.endYm !== undefined ? { endYm: it.endYm } : {}),
           sortOrder: itemOrder++,
         };
         if (it.kind === "monthly" && it.endYm && it.endYm < p.ym) {

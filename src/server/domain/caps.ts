@@ -7,7 +7,7 @@ import type { Db } from "@/db/client";
  *   cap for a month = its monthly items' amounts + that month's one-off items' planned amounts
  *
  * A monthly item is left out of a month it was skipped for (item_skips) and of
- * every month after its last one (items.end_ym).
+ * every month after its last one (items.end_ym). As-needed items add nothing.
  *
  * This is the only place `category_budgets.allocation` is written. It rewrites
  * every OPEN month (closed months keep the cap they closed with), for one

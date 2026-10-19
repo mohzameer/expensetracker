@@ -1,6 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, gt, gte, isNotNull, isNull, lt, lte, sql, sum } from "drizzle-orm";
 import type { Db } from "@/db";
+import type { ItemKind } from "@/db/schema";
 import { accountEntries, accounts, categories, categoryBudgets, categoryMonthSummary, expenses, incomes, items, itemSkips, monthlyItemStatus, months } from "@/db/schema";
 import { getAccounts, totalBalance } from "@/server/domain/accounts";
 import { addDays, addMonths, diffDays, formatDay, formatRange, periodOf, periodStart, today, type Range } from "@/lib/dates";
@@ -29,7 +30,7 @@ export type CatalogItem = {
   id: string;
   categoryId: string;
   name: string;
-  kind: "monthly" | "one_off";
+  kind: ItemKind;
   expectedAmount: number | null;
   defaultAmount: number | null;
   /** Monthly items: the last month it counts in; null = until stopped. */
@@ -186,7 +187,7 @@ export type ExpenseRow = {
   color: string | null;
   itemId: string | null;
   itemName: string | null;
-  itemKind: "monthly" | "one_off" | null;
+  itemKind: ItemKind | null;
   accountId: string | null;
 };
 

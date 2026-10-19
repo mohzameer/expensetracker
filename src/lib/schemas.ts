@@ -11,6 +11,8 @@ export const alertPct = z.number().int().min(0).max(100);
 export const name = z.string().trim().min(1, "Name is required").max(60);
 export const color = z.string().regex(/^#[0-9A-Fa-f]{6}$/);
 export const id = z.uuid();
+// The item kinds (see `items` in db/schema.ts).
+export const itemKind = z.enum(["monthly", "one_off", "as_needed"]);
 
 export const expenseInput = z.object({
   spentOn: isoDate,
@@ -43,7 +45,7 @@ export const newItemInput = z
   .object({
     categoryId: id,
     name,
-    kind: z.enum(["monthly", "one_off"]),
+    kind: itemKind,
     expectedAmount: optionalAmount,
     defaultAmount: optionalAmount,
     ym: yearMonth,
@@ -73,7 +75,7 @@ export const savingsAdjustInput = z.object({
 const setupItem = z.object({
   id: id.nullable(),
   name,
-  kind: z.enum(["monthly", "one_off"]),
+  kind: itemKind,
   expectedAmount: optionalAmount,
   defaultAmount: optionalAmount,
   /** Monthly items only: leave it out of this month (no cap, not due). */

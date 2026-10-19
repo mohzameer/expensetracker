@@ -566,6 +566,47 @@ describe("items across months", () => {
   });
 });
 
+describe("as-needed items", () => {
+  const cap = async (ym: string, categoryId: string) => (await summary(ym, categoryId)).allocation;
+  const dueNames = async (ym: string) => (await getMonthlyItems(db, (await getMonth(db, ym))!)).map((d) => d.name);
+  const offered = async (ym: string) => (await itemsForMonth(db, (await getMonth(db, ym))!.id)).map((i) => i.name);
+
+  it("are offered every month but add nothing to the cap and are never due", async () => {
+    const s = await seedSeptember(db);
+    const doctor = await createItem(db, { categoryId: s.groceries.id, name: "Doctor", kind: "as_needed", defaultAmount: rs(2500), ym: "2026-09" });
+    expect([doctor.monthId, doctor.expectedAmount, doctor.defaultAmount]).toEqual([null, null, rs(2500)]);
+    await ensureMonth(db, "2026-10");
+    for (const ym of ["2026-09", "2026-10"]) {
+      expect(await cap(ym, s.groceries.id)).toBe(rs(30000));
+      expect(await offered(ym)).toContain("Doctor");
+      expect(await dueNames(ym)).not.toContain("Doctor");
+    }
+    // Spending on it is unplanned: nothing was planned for it.
+    await s.expense(s.groceries.id, rs(3200), "2026-09-12", doctor.id);
+    const [row] = (await getUnplanned(db, "2026-09")).filter((r) => r.categoryId === s.groceries.id);
+    expect(row).toMatchObject({ unplanned: rs(3200), due: rs(30000) });
+  });
+
+  it("switching a monthly item to as needed in Setup drops it from the cap and clears its skip and end", async () => {
+    const s = await seedSeptember(db);
+    await ensureMonth(db, "2026-10");
+    const save = (item: Record<string, unknown>) =>
+      saveSetup(db, {
+        ym: "2026-09", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
+        categories: [{ id: s.utilities.id, name: "Utilities", color: "#00897B", alertPct: null, removed: false,
+          items: [{ id: s.internet.id, name: "Internet", removed: false, ...item } as never] }],
+      });
+    await save({ kind: "monthly", expectedAmount: rs(3990), defaultAmount: null, skipped: true, endYm: "2026-10" });
+    await save({ kind: "as_needed", expectedAmount: null, defaultAmount: rs(4000), skipped: true, endYm: "2026-10" });
+    const [row] = await db.select().from(items).where(eq(items.id, s.internet.id));
+    expect([row.kind, row.monthId, row.expectedAmount, row.defaultAmount, row.endYm]).toEqual(["as_needed", null, null, rs(4000), null]);
+    expect(await cap("2026-09", s.utilities.id)).toBe(rs(14010));
+    expect(await cap("2026-10", s.utilities.id)).toBe(rs(14010));
+    expect(await offered("2026-10")).toContain("Internet");
+    expect(await dueNames("2026-09")).not.toContain("Internet");
+  });
+});
+
 describe("pay-cycle months (start on the 25th)", () => {
   const startOn = (day: number) => db.update(settings).set({ periodStartDay: day }).where(eq(settings.id, 1));
 

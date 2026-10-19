@@ -74,10 +74,10 @@ describe("analysis", () => {
     { id: "ride", name: "Rides", color: "#222" },
   ];
   const item = (
-    categoryId: string, name: string, kind: "monthly" | "one_off", amount: number | null, ym: string | null,
+    categoryId: string, name: string, kind: ItemRef["kind"], amount: number | null, ym: string | null,
     extra: Partial<ItemRef> = {},
   ): ItemRef => ({
-    categoryId, name, kind, expectedAmount: kind === "monthly" ? amount : null, defaultAmount: kind === "one_off" ? amount : null,
+    categoryId, name, kind, expectedAmount: kind === "monthly" ? amount : null, defaultAmount: kind !== "monthly" ? amount : null,
     ym, archived: false, createdOn: "2026-01-01", skippedIn: [], endYm: null, ...extra,
   });
 
@@ -185,6 +185,17 @@ describe("analysis", () => {
     expect(topItems([], items, cats, "2026-09", 25).map((t) => t.name)).not.toContain("Gas");
     // The item created in November isn't planned for September, but is for November.
     expect(cycleGrid([], items, cats, "2026-11", 25).categories[0].items.map((i) => i.name)).toContain("Later");
+  });
+
+  it("an as-needed item plans nothing: listed only in the months it was paid", () => {
+    const items = [item("food", "Doctor", "as_needed", 2500, null)]; // the usual amount is only a prefill
+    const rows = [row("2026-10-02", 3200, "Doctor")];
+    expect(cycleGrid(rows, items, cats, "2026-09", 25).categories[0].items).toMatchObject([{ name: "Doctor", kind: "as_needed", planned: null, spent: 3200 }]);
+    expect(cycleGrid(rows, items, cats, "2026-09", 25).categories[0].planned).toBe(0);
+    expect(topItems(rows, items, cats, "2026-09", 25).map((t) => [t.name, t.total, t.planned])).toEqual([["Doctor", 3200, null]]);
+    // A month it didn't come up in doesn't list it.
+    expect(cycleGrid([], items, cats, "2026-10", 25).categories).toEqual([]);
+    expect(topItems([], items, cats, "2026-10", 25)).toEqual([]);
   });
 
   it("finds entries by note, item or category, and by account", () => {

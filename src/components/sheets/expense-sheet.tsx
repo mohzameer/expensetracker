@@ -7,11 +7,14 @@ import { Sheet } from "./sheet";
 import { CreatableCombobox, type ComboOption } from "@/components/combobox";
 import { BudgetLine } from "@/components/budget-line";
 import { createCategoryAction, createItemAction } from "@/server/actions";
+import type { ItemKind } from "@/db/schema";
 import type { CatalogCategory, CatalogItem, CategorySummary, DueItem, ExpenseRow } from "@/server/queries";
 import { stateAfter } from "@/lib/budget";
 import { formatAmount, formatMoney, parseMoney, toInputValue } from "@/lib/money";
 import { formatDay, formatMonth, periodOf, type Range } from "@/lib/dates";
 import { cn } from "@/lib/utils";
+
+const KIND_LABEL: Record<ItemKind, string> = { one_off: "One-off", monthly: "Monthly", as_needed: "As needed" };
 
 export type EntryData = {
   ym: string;
@@ -73,7 +76,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
   // (e.g. rent paid before you entered today's balance). Counts for budgets only.
   const [noDeduct, setNoDeduct] = useState(!!original && original.accountId === null);
   const [newCategory, setNewCategory] = useState<{ name: string; alertPct: string } | null>(null);
-  const [newItem, setNewItem] = useState<{ name: string; kind: "one_off" | "monthly"; amount: string } | null>(null);
+  const [newItem, setNewItem] = useState<{ name: string; kind: ItemKind; amount: string } | null>(null);
   const [extraCats, setExtraCats] = useState<CatalogCategory[]>([]);
   const [extraItems, setExtraItems] = useState<CatalogItem[]>([]);
   const [creating, startCreating] = useTransition();
@@ -106,7 +109,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
   });
   const itemOptions: ComboOption[] = items
     .filter((i) => i.categoryId === categoryId)
-    .map((i) => ({ value: i.id, label: i.name, hint: i.kind === "monthly" ? "Monthly" : undefined }));
+    .map((i) => ({ value: i.id, label: i.name, hint: i.kind === "one_off" ? undefined : KIND_LABEL[i.kind] }));
   const selectedItem = items.find((i) => i.id === itemId) ?? null;
   const selectedCategory = categories.find((c) => c.id === categoryId) ?? null;
 
@@ -124,12 +127,12 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryId, sameMonth, data.summaries, amount, original]);
 
-  // Amount defaults: a monthly item fills in its monthly amount; a one-off starts empty.
+  // Amount defaults: a monthly item fills in its monthly amount, an as-needed one its usual amount; a one-off starts empty.
   const pickItem = (id: string | null) => {
     setItemId(id);
     if (amountTyped) return;
     const it = items.find((i) => i.id === id);
-    setAmountStr(it?.kind === "monthly" ? toInputValue(it.expectedAmount) : "");
+    setAmountStr(it?.kind === "monthly" ? toInputValue(it.expectedAmount) : it?.kind === "as_needed" ? toInputValue(it.defaultAmount) : "");
   };
 
   const createCategory = () => {
@@ -158,7 +161,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
         name: newItem.name,
         kind: newItem.kind,
         expectedAmount: newItem.kind === "monthly" ? amt : null,
-        defaultAmount: newItem.kind === "one_off" ? amt : null,
+        defaultAmount: newItem.kind !== "monthly" ? amt : null,
         ym: entryYm,
       });
       if (!res.ok) return void toast.error(res.error);
@@ -289,7 +292,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
             badge={
               selectedItem && (
                 <span className="rounded-[10px] bg-paper px-2 py-1 text-xs font-semibold text-muted-ink">
-                  {selectedItem.kind === "monthly" ? "Monthly" : "One-off"}
+                  {KIND_LABEL[selectedItem.kind]}
                 </span>
               )
             }
@@ -300,11 +303,13 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
               <p className="-mt-2 text-[13px] text-muted-ink">
                 {newItem.kind === "monthly"
                   ? "Repeats: it stays under this category every month."
-                  : `Just for ${formatMonth(entryYm, { month: "long" })}: it won't carry into next month.`}
+                  : newItem.kind === "as_needed"
+                    ? "Stays under this category every month, for the months it comes up."
+                    : `Just for ${formatMonth(entryYm, { month: "long" })}: it won't carry into next month.`}
               </p>
               <input aria-label="Item name" className={inputBox} value={newItem.name} onChange={(e) => setNewItem({ ...newItem, name: e.target.value })} />
-              <div role="radiogroup" aria-label="Kind" className="grid grid-cols-2 gap-1 rounded-xl bg-surface p-1">
-                {(["one_off", "monthly"] as const).map((k) => (
+              <div role="radiogroup" aria-label="Kind" className="grid grid-cols-3 gap-1 rounded-xl bg-surface p-1">
+                {(["one_off", "monthly", "as_needed"] as const).map((k) => (
                   <button
                     key={k}
                     type="button"
@@ -313,15 +318,17 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
                     onClick={() => setNewItem({ ...newItem, kind: k })}
                     className={cn("min-h-10 rounded-[10px] text-sm font-semibold", newItem.kind === k ? "bg-ink text-white" : "text-muted-ink")}
                   >
-                    {k === "one_off" ? "One-off" : "Monthly"}
+                    {KIND_LABEL[k]}
                   </button>
                 ))}
               </div>
               <div className="flex flex-col gap-1.5">
-                <label htmlFor="ni-amount" className={fieldLabel}>{newItem.kind === "monthly" ? "Expected each month" : "Planned amount (optional)"}</label>
+                <label htmlFor="ni-amount" className={fieldLabel}>{newItem.kind === "monthly" ? "Expected each month" : newItem.kind === "as_needed" ? "Usual amount (optional)" : "Planned amount (optional)"}</label>
                 <input id="ni-amount" inputMode="decimal" className={inputBox} value={newItem.amount} onChange={(e) => setNewItem({ ...newItem, amount: e.target.value })} />
                 <span className="text-xs text-muted-ink">
-                  Adds to {selectedCategory?.name}&apos;s cap{newItem.kind === "monthly" ? " every month" : ` for ${formatMonth(entryYm, { month: "long" })}`}.
+                  {newItem.kind === "as_needed"
+                    ? `Fills in the amount when you pick it. Adds nothing to ${selectedCategory?.name}'s cap.`
+                    : <>Adds to {selectedCategory?.name}&apos;s cap{newItem.kind === "monthly" ? " every month" : ` for ${formatMonth(entryYm, { month: "long" })}`}.</>}
                 </span>
               </div>
               <div className="flex gap-2">

@@ -1,3 +1,4 @@
+import type { ItemKind } from "@/db/schema";
 import { addDays, addMonths, diffDays, formatDay, formatMonth, periodEnd, periodOf, periodStart, weekStart, type Range } from "./dates";
 
 /** One expense, as the Analysis page sees it. */
@@ -17,7 +18,7 @@ export type Row = {
 export type ItemRef = {
   categoryId: string;
   name: string;
-  kind: "monthly" | "one_off";
+  kind: ItemKind;
   expectedAmount: number | null;
   defaultAmount: number | null;
   ym: string | null;
@@ -127,7 +128,7 @@ type CycleItem = {
   key: string;
   categoryId: string;
   name: string;
-  kind: "monthly" | "one_off";
+  kind: ItemKind;
   /** null when there is no amount, or the item was skipped for this month. */
   planned: number | null;
   skipped: boolean;
@@ -138,7 +139,7 @@ type CycleItem = {
 };
 
 /**
- * The items that belong to budget month `ym`, by key: every monthly item plus that
+ * The items that belong to budget month `ym`, by key: every monthly and as-needed item plus that
  * month's one-offs. Planned = a monthly item's expected amount (nothing if it was skipped
  * for this month), or the one-off's amount.
  */
@@ -152,7 +153,8 @@ function cycleItems(items: ItemRef[], categories: CategoryRef[], ym: string, sta
     // A monthly item past its last month plans nothing; it only shows if it was still paid.
     const ended = it.kind === "monthly" && it.endYm != null && it.endYm < ym;
     const skipped = it.kind === "monthly" && !ended && it.skippedIn.includes(ym);
-    const amount = skipped || ended ? null : it.kind === "monthly" ? it.expectedAmount : it.defaultAmount;
+    // An as-needed item plans nothing (its amount is only a prefill); it only shows if it was paid.
+    const amount = skipped || ended || it.kind === "as_needed" ? null : it.kind === "monthly" ? it.expectedAmount : it.defaultAmount;
     const listable = (amount != null || skipped) && !it.archived && live.has(it.categoryId) && (it.kind === "one_off" || it.createdOn < end);
     const cur = out.get(key);
     if (cur) {
@@ -225,7 +227,7 @@ export type GridItem = {
   key: string;
   /** null = spending in the category without an item. */
   name: string | null;
-  kind: "monthly" | "one_off" | null;
+  kind: ItemKind | null;
   /** A monthly item left out of this month: nothing planned for it. */
   skipped: boolean;
   /** Distinct days it was paid on, oldest first. */

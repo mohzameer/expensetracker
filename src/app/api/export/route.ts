@@ -10,6 +10,8 @@ const cell = (v: string | number | null) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
+const KIND = { monthly: "monthly", one_off: "one-off", as_needed: "as needed" } as const;
+
 /** GET /api/export?month=YYYY-MM → CSV of expenses (all months without `month`). */
 export async function GET(request: NextRequest) {
   const session = await getSession();
@@ -20,7 +22,7 @@ export async function GET(request: NextRequest) {
   const lines = [
     ["date", "category", "item", "kind", "amount", "note"].join(","),
     ...rows.map((r) =>
-      [r.spentOn, r.categoryName, r.itemName, r.itemKind === "one_off" ? "one-off" : r.itemKind, toInputValue(r.amount), r.note].map(cell).join(","),
+      [r.spentOn, r.categoryName, r.itemName, r.itemKind && KIND[r.itemKind], toInputValue(r.amount), r.note].map(cell).join(","),
     ),
   ];
   return new NextResponse(lines.join("\n") + "\n", {

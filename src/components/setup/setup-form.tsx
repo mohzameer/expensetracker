@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Archive, CalendarOff, Lock, Plus, Undo2, X } from "lucide-react";
 import { MonthHeader } from "@/components/page-header";
 import { saveSetupAction } from "@/server/actions";
+import type { ItemKind } from "@/db/schema";
 import type { getSetupPage } from "@/server/queries";
 import { addMonths, diffMonths, formatMonth } from "@/lib/dates";
 import { formatAmount, formatMoney, parseMoney, toInputValue } from "@/lib/money";
@@ -12,7 +13,7 @@ import { CATEGORY_COLORS } from "@/lib/palette";
 import { cn } from "@/lib/utils";
 
 type Data = Awaited<ReturnType<typeof getSetupPage>>;
-type Kind = "monthly" | "one_off";
+type Kind = ItemKind;
 type ItemState = {
   key: string;
   id: string | null;
@@ -72,9 +73,9 @@ function initialState(data: Data): CatState[] {
 const field = "min-h-10 w-full rounded-[10px] border border-line-strong bg-surface px-2.5 text-[15px] outline-none focus:border-teal disabled:bg-paper";
 const label = "text-xs font-semibold text-muted-ink";
 /** Item rows: name · kind · amount · one action button. */
-const ITEM_GRID = "grid grid-cols-[minmax(0,1fr)_110px_110px_40px] gap-2";
+const ITEM_GRID = "grid grid-cols-[minmax(0,1fr)_110px_110px_40px] gap-2 sm:grid-cols-[minmax(0,1fr)_124px_110px_40px]";
 /** A monthly row being removed shows two buttons (skip instead, undo). */
-const ITEM_GRID_TWO = "grid grid-cols-[minmax(0,1fr)_110px_110px_84px] gap-2";
+const ITEM_GRID_TWO = "grid grid-cols-[minmax(0,1fr)_110px_110px_84px] gap-2 sm:grid-cols-[minmax(0,1fr)_124px_110px_84px]";
 
 export function SetupForm({ data }: { data: Data }) {
   const initial = useMemo(() => initialState(data), [data]);
@@ -178,7 +179,7 @@ export function SetupForm({ data }: { data: Data }) {
                 name: i.name,
                 kind: i.kind,
                 expectedAmount: i.kind === "monthly" ? amt : null,
-                defaultAmount: i.kind === "one_off" ? amt : null,
+                defaultAmount: i.kind !== "monthly" ? amt : null,
                 skipped: i.kind === "monthly" && i.skipped,
                 endYm: i.kind === "monthly" ? i.endYm : null,
                 removed: i.removed,
@@ -197,8 +198,8 @@ export function SetupForm({ data }: { data: Data }) {
         <div className="flex flex-col gap-1.5">
           <MonthHeader ym={data.ym} range={data.range} href={(ym) => `/setup?month=${ym}`} title={`Setup · ${formatMonth(data.ym)}`} />
           <span className="text-sm text-muted-ink">
-            Everything on one page. Categories and monthly items carry into every month; one-off items are for {monthName} only.
-            A category&apos;s cap is the total of its items.
+            Everything on one page. Categories and monthly items carry into every month; one-off items are for {monthName} only;
+            as-needed items are there every month for when they come up. A category&apos;s cap is the total of its monthly and one-off items.
           </span>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -370,11 +371,12 @@ export function SetupForm({ data }: { data: Data }) {
                       >
                         <option value="one_off">One-off</option>
                         <option value="monthly">Monthly</option>
+                        <option value="as_needed">As needed</option>
                       </select>
                       <input
                         aria-label={`Amount for ${i.name || "item"}`}
                         inputMode="decimal"
-                        placeholder={i.kind === "monthly" ? "Required" : "Planned"}
+                        placeholder={i.kind === "monthly" ? "Required" : i.kind === "as_needed" ? "Usual" : "Planned"}
                         value={i.amount}
                         disabled={i.removed}
                         onChange={(e) => updateItem(c.key, i.key, { amount: e.target.value })}
@@ -440,7 +442,7 @@ export function SetupForm({ data }: { data: Data }) {
                         onClose={() => setAsking(null)}
                       />
                     ) : (
-                      (i.kind === "monthly" && !i.removed) || (i.id && data.prevSpentByItem[i.id]) ? (
+                      (i.kind !== "one_off" && !i.removed) || (i.id && data.prevSpentByItem[i.id]) ? (
                         <span className="pl-2.5 text-xs text-muted-ink">
                           {i.kind === "monthly" && !i.removed && (
                             <>
@@ -455,9 +457,10 @@ export function SetupForm({ data }: { data: Data }) {
                               )}
                             </>
                           )}
+                          {i.kind === "as_needed" && !i.removed && "Every month, when it comes up · not in the cap"}
                           {i.id && data.prevSpentByItem[i.id] ? (
                             <>
-                              {i.kind === "monthly" && !i.removed && " · "}
+                              {i.kind !== "one_off" && !i.removed && " · "}
                               {formatMonth(data.prevYm, { month: "long" })}: spent {formatAmount(data.prevSpentByItem[i.id])}
                             </>
                           ) : null}

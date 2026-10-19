@@ -136,6 +136,14 @@ export const categoryBudgets = pgTable(
   ],
 );
 
+/**
+ * monthly   — a fixed amount every month: counts in the cap and is due.
+ * one_off   — belongs to one month; its planned amount counts in that month's cap.
+ * as_needed — offered every month but may not come up at all: adds nothing to the cap and is never due.
+ */
+export const itemKinds = ["monthly", "one_off", "as_needed"] as const;
+export type ItemKind = (typeof itemKinds)[number];
+
 export const items = pgTable(
   "items",
   {
@@ -144,10 +152,10 @@ export const items = pgTable(
       .notNull()
       .references(() => categories.id, { onDelete: "cascade" }),
     name: text().notNull(),
-    kind: text({ enum: ["monthly", "one_off"] }).notNull(),
+    kind: text({ enum: itemKinds }).notNull(),
     expectedAmount: money(), // monthly items
-    defaultAmount: money(), // one-off prefill
-    // One-off items belong to the month they were added for; monthly items (null) carry into every month.
+    defaultAmount: money(), // one-off: planned amount; as-needed: the usual amount, a prefill only
+    // One-off items belong to the month they were added for; monthly and as-needed items (null) carry into every month.
     monthId: uuid().references(() => months.id),
     // Monthly items only: the last budget month ("YYYY-MM") it counts in; null = until stopped.
     endYm: char({ length: 7 }),
@@ -156,7 +164,7 @@ export const items = pgTable(
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    // Names are unique per category among monthly items, and per category per month among one-offs.
+    // Names are unique per category among monthly and as-needed items, and per category per month among one-offs.
     uniqueIndex("items_category_name_month_idx").on(
       t.categoryId,
       sql`lower(name)`,
@@ -165,7 +173,7 @@ export const items = pgTable(
     // Target of the composite FK on expenses, so an expense's item always
     // belongs to the expense's category.
     unique("items_id_category_uq").on(t.id, t.categoryId),
-    check("items_kind", sql`kind in ('monthly', 'one_off')`),
+    check("items_kind", sql`kind in ('monthly', 'one_off', 'as_needed')`),
     check("items_month_scope", sql`(kind = 'one_off') = (month_id is not null)`),
     check("items_monthly_expected", sql`kind <> 'monthly' or expected_amount is not null`),
     check("items_expected_positive", sql`expected_amount is null or expected_amount > 0`),
