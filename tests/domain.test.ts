@@ -8,7 +8,7 @@ import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
 import { assignCategory, createExpense, updateExpense } from "@/server/domain/expenses";
 import { addAccountAdjustment, createAccount, deleteAccountAdjustment, getAccounts, setAccountBalance, transferBetweenAccounts } from "@/server/domain/accounts";
 import { createItem, itemsForMonth, removeCategory, saveSetup, setChartHiddenCategories } from "@/server/domain/catalog";
-import { getMonthlyItems } from "@/server/queries";
+import { getDashboard, getMonthlyItems, getUnplanned } from "@/server/queries";
 import { freshDb, rs, seedSeptember } from "./helpers";
 
 let db: Db;
@@ -159,6 +159,38 @@ describe("monthly items", () => {
     expect((await status()).status).toBe("paid");
     await s.expense(s.utilities.id, rs(450), "2026-09-21", s.internet.id);
     expect((await status()).paid).toBe(rs(4440));
+  });
+});
+
+describe("unplanned spending", () => {
+  it("counts what items were paid beyond their plan plus spending on nothing planned", async () => {
+    const s = await seedSeptember(db);
+    await s.expense(s.utilities.id, rs(10000), "2026-09-05", s.internet.id); // Internet planned 3,990 → 6,010 over
+    await s.expense(s.dining.id, rs(500)); // no item → all unplanned
+    const snack = await createItem(db, { categoryId: s.groceries.id, name: "Snacks", kind: "one_off", defaultAmount: rs(1000), ym: "2026-09" });
+    await s.expense(s.groceries.id, rs(1500), "2026-09-10", snack.id); // one-off planned 1,000 → 500 over
+    await s.expense(s.groceries.id, rs(200), "2026-10-02"); // next month
+
+    const rows = await getUnplanned(db, "2026-09");
+    const of = (categoryId: string) => rows.find((r) => r.categoryId === categoryId);
+    expect(of(s.utilities.id)).toMatchObject({ unplanned: rs(6010), due: rs(14010) });
+    expect(of(s.dining.id)).toMatchObject({ unplanned: rs(500), due: rs(12000) });
+    expect(of(s.groceries.id)).toMatchObject({ unplanned: rs(500), due: rs(30000) });
+    expect(rows.every((r) => r.yearMonth === "2026-09")).toBe(true);
+
+    // Utilities has 8,000 left but Power still needs 14,010: 6,010 over budget once it's paid.
+    let d = await getDashboard(db, "2026-09");
+    expect(d.totals).toMatchObject({ unplanned: rs(7010), short: rs(6010 + 500 + 500) });
+    expect(d.short[0]).toMatchObject({ name: "Utilities", amount: rs(6010) });
+
+    // A cover makes room for it: still unplanned, no longer short.
+    await moveToCategory(db, { ym: "2026-09", toCategoryId: s.utilities.id, source: { kind: "savings" }, amount: rs(6010), todayStr: "2026-09-29" });
+    d = await getDashboard(db, "2026-09");
+    expect(d.totals).toMatchObject({ unplanned: rs(7010), short: rs(1000) });
+    expect(d.short.map((x) => x.name)).not.toContain("Utilities");
+
+    d = await getDashboard(db, "2026-10");
+    expect(d.unplannedMonths.map((m) => [m.ym, m.total])).toEqual([["2026-09", rs(7010)], ["2026-10", rs(200)]]);
   });
 });
 

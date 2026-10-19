@@ -159,6 +159,8 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
             </section>
           </div>
 
+          <Unplanned data={data} closed={closed} />
+
           <section className="card flex flex-col gap-3 p-5 lg:px-6">
             <h2 className="text-[17px] font-semibold">Budget vs actual</h2>
             {data.summaries.length === 0 && (
@@ -237,6 +239,63 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
   );
 }
 
+/** This month's unplanned spending, and the same figure across the last 12 budget months. */
+function Unplanned({ data, closed }: { data: Data; closed: boolean }) {
+  const { totals, currency, unplannedMonths: months } = data;
+  const finished = months.filter((m) => !m.current);
+  const average = finished.length ? Math.round(finished.reduce((a, m) => a + m.total, 0) / finished.length) : null;
+  return (
+    <section className="card grid gap-6 p-5 lg:grid-cols-[minmax(0,17rem)_1fr] lg:gap-9 lg:p-6">
+      <div className="flex flex-col gap-1.5">
+        <h2 className="text-[17px] font-semibold">Unplanned</h2>
+        <span className={cn("font-display text-2xl font-semibold lg:text-[28px]", totals.unplanned > 0 && "text-warn")}>
+          {formatMoney(totals.unplanned, currency)}
+        </span>
+        <p className="text-[13px] text-muted-ink">Paid beyond each item&apos;s plan, plus spending on nothing planned.</p>
+        {!closed && totals.short > 0 && (
+          <div className="mt-2 flex flex-col gap-1.5 rounded-xl bg-bad-bg px-3 py-2.5 text-[13px] text-bad">
+            <span className="font-semibold">{formatMoney(totals.short, currency)} over budget once everything due is paid</span>
+            <ul className="flex flex-col gap-0.5">
+              {data.short.map((s) => (
+                <li key={s.categoryId} className="flex justify-between gap-2">
+                  <span>{s.name}</span>
+                  <span className="font-semibold">{formatAmount(s.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {!closed && totals.short <= 0 && totals.unplanned > 0 && (
+          <p className="text-[13px] text-ok">Covered — what&apos;s left still pays for everything due.</p>
+        )}
+      </div>
+      <div className="flex min-w-0 flex-col gap-2">
+        <span className="text-[13px] text-muted-ink">
+          By month.
+          {average != null && ` Dashed line = average of finished months (${formatMoney(average, currency)}).`}
+          {months.some((m) => m.current) && " Grey bar = this month so far."}
+        </span>
+        {months.every((m) => m.total === 0) ? (
+          <p className="text-[15px] text-muted-ink">Nothing unplanned yet.</p>
+        ) : (
+          <ColumnChart
+            ariaLabel="Unplanned spending by budget month"
+            height={200}
+            color="var(--warn-bar)"
+            reference={average == null ? undefined : { value: average, label: "Average" }}
+            data={months.map((m) => ({
+              label: formatMonth(m.ym, { month: "short" }).slice(0, 3),
+              value: m.total,
+              muted: m.current,
+              detail: `${formatMonth(m.ym)}${m.current ? " · so far" : ""}`,
+            }))}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
 function Tile({ label, value, sub, valueClass }: { label: string; value: string; sub: React.ReactNode; valueClass?: string }) {
   return (
     <div className="card flex flex-col gap-1.5 px-5 py-[18px]">
@@ -246,4 +305,3 @@ function Tile({ label, value, sub, valueClass }: { label: string; value: string;
     </div>
   );
 }
-

@@ -116,6 +116,47 @@ export async function getMonthlyItems(db: Db, month: Month | null): Promise<DueI
   return rows;
 }
 
+export type UnplannedRow = { yearMonth: string; categoryId: string | null; unplanned: number; due: number };
+
+/**
+ * Per month and category, measured against the plan (each item's planned amount):
+ *
+ *   unplanned = what items were paid beyond their plan + spending on nothing planned
+ *   due       = what planned items still haven't been paid
+ *
+ * Covers don't change either number: a cover only makes room for unplanned
+ * spending, so what is left for the items still due is remaining − due.
+ */
+export async function getUnplanned(db: Db, upToYm: string): Promise<UnplannedRow[]> {
+  const res = await db.execute(sql`
+    WITH planned AS (
+      SELECT month_id, item_id, category_id, expected AS planned, paid FROM monthly_item_status
+      UNION ALL
+      SELECT i.month_id, i.id, i.category_id, coalesce(i.default_amount, 0),
+        coalesce((SELECT sum(e.amount) FROM expenses e JOIN months m ON m.id = i.month_id
+                  WHERE e.item_id = i.id AND e.spent_on >= m.starts_on AND e.spent_on < m.ends_on), 0)
+      FROM items i
+      WHERE i.kind = 'one_off' AND i.archived_at IS NULL
+    ),
+    unplanned_spend AS (
+      SELECT m.id AS month_id, e.category_id, e.amount
+      FROM expenses e
+      JOIN months m ON e.spent_on >= m.starts_on AND e.spent_on < m.ends_on
+      WHERE NOT EXISTS (SELECT 1 FROM planned p WHERE p.month_id = m.id AND p.item_id = e.item_id)
+    ),
+    x AS (
+      SELECT month_id, category_id, greatest(paid - planned, 0) AS unplanned, greatest(planned - paid, 0) AS due FROM planned
+      UNION ALL
+      SELECT month_id, category_id, amount, 0 FROM unplanned_spend
+    )
+    SELECT m.year_month, x.category_id, sum(x.unplanned)::bigint AS unplanned, sum(x.due)::bigint AS due
+    FROM x JOIN months m ON m.id = x.month_id
+    WHERE m.year_month <= ${upToYm}
+    GROUP BY m.year_month, x.category_id`);
+  const rows = (res as unknown as { rows: { year_month: string; category_id: string | null; unplanned: string | number; due: string | number }[] }).rows;
+  return rows.map((r) => ({ yearMonth: r.year_month, categoryId: r.category_id, unplanned: Number(r.unplanned), due: Number(r.due) }));
+}
+
 async function inboxCount(db: Db) {
   const [row] = await db.select({ n: sql<number>`count(*)::int` }).from(expenses).where(isNull(expenses.categoryId));
   return Number(row?.n ?? 0);
@@ -322,7 +363,7 @@ export async function getSetupPlanBase(db: Db, ym: string, plan: MonthPlan, cate
 export async function getDashboard(db: Db, ym: string) {
   const month = await getMonth(db, ym);
   const range = await rangeOf(db, ym);
-  const [accountList, plan, settings, summaries, monthly, daily] = await Promise.all([
+  const [accountList, plan, settings, summaries, monthly, daily, unplannedRows, recentMonths] = await Promise.all([
     getAccounts(db),
     getMonthPlan(db, ym),
     getSettings(db),
@@ -333,6 +374,13 @@ export async function getDashboard(db: Db, ym: string) {
       .from(expenses)
       .where(and(gte(expenses.spentOn, range.from), lt(expenses.spentOn, range.to)))
       .groupBy(expenses.spentOn, expenses.categoryId),
+    getUnplanned(db, ym),
+    db
+      .select({ ym: months.yearMonth, endsOn: months.endsOn })
+      .from(months)
+      .where(lte(months.yearMonth, ym))
+      .orderBy(desc(months.yearMonth))
+      .limit(12),
   ]);
   // The weekly chart leaves out the categories hidden with its filter.
   const hidden = new Set(settings.chartHiddenCategoryIds);
@@ -362,6 +410,22 @@ export async function getDashboard(db: Db, ym: string) {
 
   const allocated = summaries.reduce((a, s) => a + s.effectiveAllocation, 0);
   const owed = monthly.filter((m) => m.status !== "paid");
+
+  // Unplanned spending this month, and where it leaves too little for what's still due.
+  const thisMonth = unplannedRows.filter((r) => r.yearMonth === ym);
+  const short = summaries
+    .map((s) => {
+      const due = thisMonth.find((r) => r.categoryId === s.categoryId)?.due ?? 0;
+      return { categoryId: s.categoryId, name: s.name, amount: due - s.remaining };
+    })
+    .filter((s) => s.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+  const todayStr = today();
+  const unplannedMonths = [...recentMonths].reverse().map((m) => ({
+    ym: m.ym,
+    total: unplannedRows.filter((r) => r.yearMonth === m.ym).reduce((a, r) => a + r.unplanned, 0),
+    current: m.endsOn > todayStr,
+  }));
   return {
     ym,
     range,
@@ -374,7 +438,11 @@ export async function getDashboard(db: Db, ym: string) {
       left: summaries.reduce((a, s) => a + s.remaining, 0),
       owed: owed.reduce((a, m) => a + Math.max(m.expected - m.paid, 0), 0),
       uncategorized,
+      unplanned: thisMonth.reduce((a, r) => a + r.unplanned, 0),
+      short: short.reduce((a, s) => a + s.amount, 0),
     },
+    short,
+    unplannedMonths,
     owed,
     accounts: accountList,
     plan,
