@@ -19,6 +19,20 @@ export function budgetState(effectiveAllocation: number, remainingAfter: number,
   return "green";
 }
 
+/** A payment of an item that warns when paid twice in a month. */
+export type ItemPayment = { id: string; itemId: string; spentOn: string; amount: number };
+
+/**
+ * The item's other payments in the calendar month of `date` (October, not the
+ * 25 Sep → 24 Oct budget month), oldest first, leaving out the expense being edited.
+ */
+export function paidInCalendarMonth(payments: ItemPayment[], itemId: string, date: string, exceptId?: string | null): ItemPayment[] {
+  const month = date.slice(0, 7);
+  return payments
+    .filter((p) => p.itemId === itemId && p.spentOn.slice(0, 7) === month && p.id !== exceptId)
+    .sort((a, b) => a.spentOn.localeCompare(b.spentOn));
+}
+
 /** State after entering `amount` against a category's current numbers. */
 export function stateAfter(b: BudgetNumbers, amount: number) {
   const remainingAfter = b.remaining - amount;

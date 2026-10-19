@@ -8,7 +8,7 @@ import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
 import { assignCategory, createExpense, updateExpense } from "@/server/domain/expenses";
 import { addAccountAdjustment, createAccount, deleteAccountAdjustment, getAccounts, setAccountBalance, transferBetweenAccounts } from "@/server/domain/accounts";
 import { createItem, itemsForMonth, removeCategory, saveSetup, setChartHiddenCategories } from "@/server/domain/catalog";
-import { getDashboard, getMonthlyItems, getUnplanned } from "@/server/queries";
+import { getDashboard, getDayView, getMonthlyItems, getUnplanned } from "@/server/queries";
 import { freshDb, rs, seedSeptember } from "./helpers";
 
 let db: Db;
@@ -604,6 +604,28 @@ describe("as-needed items", () => {
     expect(await cap("2026-10", s.utilities.id)).toBe(rs(14010));
     expect(await offered("2026-10")).toContain("Internet");
     expect(await dueNames("2026-09")).not.toContain("Internet");
+  });
+});
+
+describe("warn when paid twice in a month", () => {
+  it("is saved from Setup, kept when left out, and the day view loads that item's payments", async () => {
+    const s = await seedSeptember(db);
+    const save = (extra: Record<string, unknown>) =>
+      saveSetup(db, {
+        ym: "2026-09", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
+        categories: [{ id: s.utilities.id, name: "Utilities", color: "#00897B", alertPct: null, removed: false,
+          items: [{ id: s.internet.id, name: "Internet", kind: "monthly", expectedAmount: rs(3990), defaultAmount: null, removed: false, ...extra }] }],
+      });
+    await save({ warnTwice: true });
+    await save({});
+    const [row] = await db.select().from(items).where(eq(items.id, s.internet.id));
+    expect(row.warnTwice).toBe(true);
+
+    await s.expense(s.utilities.id, rs(3990), "2026-09-03", s.internet.id);
+    await s.expense(s.utilities.id, rs(14010), "2026-09-04", s.power.id); // Power doesn't warn
+    const day = await getDayView(db, "2026-09-20");
+    expect(day.warnPayments.map((p) => [p.itemId, p.spentOn, p.amount])).toEqual([[s.internet.id, "2026-09-03", rs(3990)]]);
+    expect(day.catalog.items.find((i) => i.id === s.internet.id)?.warnTwice).toBe(true);
   });
 });
 

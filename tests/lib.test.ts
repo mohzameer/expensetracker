@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatAmount, formatMoney, parseMoney, toInputValue } from "@/lib/money";
-import { budgetState, stateAfter } from "@/lib/budget";
+import { budgetState, paidInCalendarMonth, stateAfter } from "@/lib/budget";
 import { addDays, addMonths, clampToMonth, diffMonths, isIsoDate, lastDay, relativeDay, today } from "@/lib/dates";
 import { cycleGrid, groupByDay, inRange, itemKey, monthBuckets, monthOfRange, presetRange, rangeBars, rowKey, searchRows, topItems, type ItemRef, type Row, type Search } from "@/lib/analysis";
 
@@ -36,6 +36,22 @@ describe("budgetState", () => {
     expect(r.remainingAfter).toBe(130000);
     expect(r.pctLeft.toFixed(1)).toBe("8.7");
     expect(r.state).toBe("amber");
+  });
+});
+
+describe("paid twice in a month", () => {
+  const pay = (id: string, itemId: string, spentOn: string) => ({ id, itemId, spentOn, amount: 100 });
+  const payments = [pay("b", "net", "2026-10-20"), pay("a", "net", "2026-10-03"), pay("c", "net", "2026-09-28"), pay("d", "gym", "2026-10-05")];
+
+  it("finds the item's other payments in the calendar month, not the budget cycle", () => {
+    // A budget cycle of 25 Sep → 24 Oct would also hold 28 Sep; the calendar month doesn't.
+    expect(paidInCalendarMonth(payments, "net", "2026-10-19").map((p) => p.id)).toEqual(["a", "b"]);
+    expect(paidInCalendarMonth(payments, "net", "2026-11-01")).toEqual([]);
+    expect(paidInCalendarMonth(payments, "gym", "2026-10-31").map((p) => p.id)).toEqual(["d"]);
+  });
+
+  it("leaves out the expense being edited", () => {
+    expect(paidInCalendarMonth(payments, "net", "2026-10-03", "a").map((p) => p.id)).toEqual(["b"]);
   });
 });
 

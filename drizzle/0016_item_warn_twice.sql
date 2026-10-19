@@ -1,0 +1,1 @@
+ALTER TABLE "items" ADD COLUMN "warn_twice" boolean DEFAULT false NOT NULL;

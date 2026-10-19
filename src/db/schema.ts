@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   bigint,
+  boolean,
   char,
   check,
   date,
@@ -159,6 +160,8 @@ export const items = pgTable(
     monthId: uuid().references(() => months.id),
     // Monthly items only: the last budget month ("YYYY-MM") it counts in; null = until stopped.
     endYm: char({ length: 7 }),
+    // Warn in the expense sheet when it is about to be paid a second time in the same calendar month.
+    warnTwice: boolean().notNull().default(false),
     sortOrder: integer().notNull().default(0),
     archivedAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),

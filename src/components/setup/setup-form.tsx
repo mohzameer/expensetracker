@@ -23,6 +23,8 @@ type ItemState = {
   skipped: boolean;
   /** Monthly items: the last month it counts in; null = until I stop. */
   endYm: string | null;
+  /** Warn in the expense sheet when it's about to be paid a second time in a calendar month. */
+  warnTwice: boolean;
   removed: boolean;
 };
 type CatState = {
@@ -65,6 +67,7 @@ function initialState(data: Data): CatState[] {
       amount: toInputValue(i.kind === "monthly" ? i.expectedAmount : i.defaultAmount),
       skipped: i.skipped,
       endYm: i.endYm,
+      warnTwice: i.warnTwice,
       removed: false,
     })),
   }));
@@ -184,6 +187,7 @@ export function SetupForm({ data }: { data: Data }) {
                 defaultAmount: i.kind !== "monthly" ? amt : null,
                 skipped: i.kind === "monthly" && i.skipped,
                 endYm: i.kind === "monthly" ? i.endYm : null,
+                warnTwice: i.kind !== "one_off" && i.warnTwice,
                 removed: i.removed,
               };
             }),
@@ -461,6 +465,21 @@ export function SetupForm({ data }: { data: Data }) {
                             </>
                           )}
                           {i.kind === "as_needed" && !i.removed && "Every month, when it comes up · not in the cap"}
+                          {i.kind !== "one_off" && !i.removed && (
+                            <>
+                              {" · "}
+                              <label className="inline-flex cursor-pointer items-center gap-1 align-middle">
+                                <input
+                                  type="checkbox"
+                                  checked={i.warnTwice}
+                                  disabled={readOnly}
+                                  onChange={(e) => updateItem(c.key, i.key, { warnTwice: e.target.checked })}
+                                  className="size-3.5 accent-teal"
+                                />
+                                Warn if paid twice in a month
+                              </label>
+                            </>
+                          )}
                           {i.id && data.prevSpentByItem[i.id] ? (
                             <>
                               {i.kind !== "one_off" && !i.removed && " · "}
@@ -475,7 +494,7 @@ export function SetupForm({ data }: { data: Data }) {
                   <button
                     type="button"
                     onClick={() =>
-                      updateCat(c.key, { items: [...c.items, { key: newKey(), id: null, name: "", kind: "one_off", amount: "", skipped: false, endYm: null, removed: false }] })
+                      updateCat(c.key, { items: [...c.items, { key: newKey(), id: null, name: "", kind: "one_off", amount: "", skipped: false, endYm: null, warnTwice: false, removed: false }] })
                     }
                     className="flex min-h-10 items-center gap-1.5 self-start rounded-[10px] px-2.5 text-sm font-semibold text-teal hover:bg-teal-wash"
                   >

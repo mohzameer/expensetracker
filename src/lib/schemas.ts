@@ -82,6 +82,8 @@ const setupItem = z.object({
   skipped: z.boolean().default(false),
   /** Monthly items only: the last month it counts in; null = until stopped. */
   endYm: yearMonth.nullable().default(null),
+  /** Warn when it's about to be paid a second time in a calendar month. */
+  warnTwice: z.boolean().optional(),
   removed: z.boolean(),
 });
 

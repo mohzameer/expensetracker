@@ -5,7 +5,7 @@ import type { ItemKind } from "@/db/schema";
 import { accountEntries, accounts, categories, categoryBudgets, categoryMonthSummary, expenses, incomes, items, itemSkips, monthlyItemStatus, months } from "@/db/schema";
 import { getAccounts, totalBalance } from "@/server/domain/accounts";
 import { addDays, addMonths, diffDays, formatDay, formatRange, periodOf, periodStart, today, type Range } from "@/lib/dates";
-import { stateAfter } from "@/lib/budget";
+import { stateAfter, type ItemPayment } from "@/lib/budget";
 import { closeBlockers, currentYm, ensureMonth, getMonth, getSettings, monthOfDate, rangeOf, type Month } from "@/server/domain/months";
 import { itemsForMonth } from "@/server/domain/catalog";
 import { getSavingsBalance } from "@/server/domain/transfers";
@@ -35,6 +35,8 @@ export type CatalogItem = {
   defaultAmount: number | null;
   /** Monthly items: the last month it counts in; null = until stopped. */
   endYm: string | null;
+  /** Warn when it's about to be paid a second time in a calendar month. */
+  warnTwice: boolean;
 };
 
 export type DueItem = {
@@ -195,7 +197,10 @@ export async function getDayView(db: Db, date: string) {
   const ym = await monthOfDate(db, date);
   const month = await getMonth(db, ym);
   const range = await rangeOf(db, ym);
-  const [accountList, settings, summaries, catalog, monthly, dayExpenses, count, savings, monthSpend] = await Promise.all([
+  // Calendar months around the budget month: the sheet's date can move a little either side of it.
+  const paymentsFrom = `${addMonths(range.from.slice(0, 7), -1)}-01`;
+  const paymentsTo = `${addMonths(range.to.slice(0, 7), 2)}-01`;
+  const [accountList, settings, summaries, catalog, monthly, dayExpenses, count, savings, monthSpend, warnPayments] = await Promise.all([
     getAccounts(db),
     getSettings(db),
     getSummaries(db, month),
@@ -214,6 +219,12 @@ export async function getDayView(db: Db, date: string) {
       .select({ total: sum(expenses.amount).mapWith(Number) })
       .from(expenses)
       .where(and(gte(expenses.spentOn, range.from), lt(expenses.spentOn, range.to))),
+    // Payments of the items that warn when paid twice in a calendar month.
+    db
+      .select({ id: expenses.id, itemId: sql<string>`${expenses.itemId}`, spentOn: expenses.spentOn, amount: expenses.amount })
+      .from(expenses)
+      .innerJoin(items, eq(items.id, expenses.itemId))
+      .where(and(eq(items.warnTwice, true), gte(expenses.spentOn, paymentsFrom), lt(expenses.spentOn, paymentsTo))),
   ]);
 
   const allocated = summaries.reduce((a, s) => a + s.effectiveAllocation, 0);
@@ -230,6 +241,7 @@ export async function getDayView(db: Db, date: string) {
     summaries,
     catalog,
     monthly,
+    warnPayments: warnPayments as ItemPayment[],
     expenses: dayExpenses as ExpenseRow[],
     inboxCount: count,
     savings,
@@ -710,7 +722,7 @@ export async function getSetupPage(db: Db, ym: string) {
       alertPct: byCat.get(c.id)?.alertPct ?? null,
       items: catalog.items
         .filter((i) => i.categoryId === c.id)
-        .map((i) => ({ id: i.id, name: i.name, kind: i.kind, expectedAmount: i.expectedAmount, defaultAmount: i.defaultAmount, skipped: skipped.has(i.id), endYm: i.endYm })),
+        .map((i) => ({ id: i.id, name: i.name, kind: i.kind, expectedAmount: i.expectedAmount, defaultAmount: i.defaultAmount, skipped: skipped.has(i.id), endYm: i.endYm, warnTwice: i.warnTwice })),
     })),
   };
 }

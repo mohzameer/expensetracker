@@ -2,14 +2,14 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Trash2 } from "lucide-react";
+import { AlertTriangle, Trash2 } from "lucide-react";
 import { Sheet } from "./sheet";
 import { CreatableCombobox, type ComboOption } from "@/components/combobox";
 import { BudgetLine } from "@/components/budget-line";
 import { createCategoryAction, createItemAction } from "@/server/actions";
 import type { ItemKind } from "@/db/schema";
 import type { CatalogCategory, CatalogItem, CategorySummary, DueItem, ExpenseRow } from "@/server/queries";
-import { stateAfter } from "@/lib/budget";
+import { paidInCalendarMonth, stateAfter, type ItemPayment } from "@/lib/budget";
 import { formatAmount, formatMoney, parseMoney, toInputValue } from "@/lib/money";
 import { formatDay, formatMonth, periodOf, type Range } from "@/lib/dates";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,8 @@ export type EntryData = {
   summaries: CategorySummary[];
   catalog: { categories: CatalogCategory[]; items: CatalogItem[] };
   monthly: DueItem[];
+  /** Payments of the items that warn when paid twice in a calendar month. */
+  warnPayments: ItemPayment[];
   accounts: { id: string; name: string; balance: number }[];
   defaultAccountId: string | null;
 };
@@ -201,7 +203,9 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
     );
   };
 
-  const warn = budget && budget.state !== "green";
+  // An item set to warn when paid twice: its other payments in this date's calendar month.
+  const alreadyPaid = selectedItem?.warnTwice && categoryId ? paidInCalendarMonth(data.warnPayments, selectedItem.id, date, original?.id) : [];
+  const warn = (budget && budget.state !== "green") || alreadyPaid.length > 0;
   const spentPct = budget && budget.effectiveAllocation > 0 ? ((budget.effectiveAllocation - budget.remaining) / budget.effectiveAllocation) * 100 : 0;
   const thisPct = budget && budget.effectiveAllocation > 0 ? ((amount ?? 0) / budget.effectiveAllocation) * 100 : 0;
 
@@ -346,6 +350,18 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
                 <button type="button" disabled={creating || !newItem.name.trim()} onClick={createItem} className="min-h-11 flex-1 rounded-xl bg-teal text-sm font-semibold text-white disabled:opacity-60">
                   {creating ? "Creating…" : "Create item"}
                 </button>
+              </div>
+            </div>
+          )}
+          {selectedItem && alreadyPaid.length > 0 && (
+            <div role="status" aria-live="polite" className="flex items-start gap-3 rounded-[14px] bg-warn-bg p-3.5 text-warn">
+              <AlertTriangle aria-hidden className="mt-px size-5 shrink-0" strokeWidth={2.2} />
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[15px] font-semibold">Already paid in {formatMonth(date.slice(0, 7), { month: "long" })}</span>
+                <span className="text-[13px]">
+                  {selectedItem.name}: {alreadyPaid.map((p) => `${formatMoney(p.amount, data.currency)} on ${formatDay(p.spentOn)}`).join(", ")}. Saving adds
+                  another payment.
+                </span>
               </div>
             </div>
           )}

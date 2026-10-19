@@ -56,6 +56,7 @@ export async function itemsForMonth(db: Db, monthId: string | null) {
       expectedAmount: items.expectedAmount,
       defaultAmount: items.defaultAmount,
       endYm: items.endYm,
+      warnTwice: items.warnTwice,
     })
     .from(items)
     .where(and(isNull(items.archivedAt), monthId ? or(running, eq(items.monthId, monthId)) : running))
@@ -158,6 +159,8 @@ export type SetupItem = {
   skipped?: boolean;
   /** Monthly items only: the last month it counts in; null = until stopped. Left as it is when omitted. */
   endYm?: string | null;
+  /** Warn when it's about to be paid a second time in a calendar month. Left as it is when omitted. */
+  warnTwice?: boolean;
   removed: boolean;
 };
 
@@ -257,6 +260,7 @@ export async function saveSetup(db: Db, p: SetupPayload) {
           monthId: it.kind === "one_off" ? month.id : null,
           // How long a monthly item runs. Other kinds never have an end month.
           ...(it.kind !== "monthly" ? { endYm: null } : it.endYm !== undefined ? { endYm: it.endYm } : {}),
+          ...(it.warnTwice !== undefined ? { warnTwice: it.warnTwice } : {}),
           sortOrder: itemOrder++,
         };
         if (it.kind === "monthly" && it.endYm && it.endYm < p.ym) {
