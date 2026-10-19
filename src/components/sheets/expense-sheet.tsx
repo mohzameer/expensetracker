@@ -174,6 +174,16 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
     });
   };
 
+  // The new category / new item panels sit inside the expense form: Enter (or the phone
+  // keyboard's Go) there creates what's being added, rather than saving the expense.
+  const enterTo = (fn: () => void) => (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    if (!creating) fn();
+  };
+  const createCategoryOnEnter = enterTo(() => newCategory?.name.trim() && createCategory());
+  const createItemOnEnter = enterTo(() => newItem?.name.trim() && createItem());
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!amount) return void toast.error("Enter an amount above zero.");
@@ -242,11 +252,11 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
               <div className="grid grid-cols-[1fr_96px] gap-2.5">
                 <div className="flex flex-col gap-1.5">
                   <label htmlFor="nc-name" className={fieldLabel}>Name</label>
-                  <input id="nc-name" className={inputBox} value={newCategory.name} onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })} />
+                  <input id="nc-name" enterKeyHint="done" onKeyDown={createCategoryOnEnter} className={inputBox} value={newCategory.name} onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })} />
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label htmlFor="nc-alert" className={fieldLabel}>Alert at %</label>
-                  <input id="nc-alert" inputMode="numeric" placeholder={String(data.defaultAlertPct)} className={inputBox} value={newCategory.alertPct} onChange={(e) => setNewCategory({ ...newCategory, alertPct: e.target.value.replace(/\D/g, "").slice(0, 3) })} />
+                  <input id="nc-alert" inputMode="numeric" enterKeyHint="done" onKeyDown={createCategoryOnEnter} placeholder={String(data.defaultAlertPct)} className={inputBox} value={newCategory.alertPct} onChange={(e) => setNewCategory({ ...newCategory, alertPct: e.target.value.replace(/\D/g, "").slice(0, 3) })} />
                 </div>
               </div>
               <p className="text-[13px] text-muted-ink">Its cap is the total of the items you add to it.</p>
@@ -307,7 +317,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
                     ? "Stays under this category every month, for the months it comes up."
                     : `Just for ${formatMonth(entryYm, { month: "long" })}: it won't carry into next month.`}
               </p>
-              <input aria-label="Item name" className={inputBox} value={newItem.name} onChange={(e) => setNewItem({ ...newItem, name: e.target.value })} />
+              <input aria-label="Item name" enterKeyHint="done" onKeyDown={createItemOnEnter} className={inputBox} value={newItem.name} onChange={(e) => setNewItem({ ...newItem, name: e.target.value })} />
               <div role="radiogroup" aria-label="Kind" className="grid grid-cols-3 gap-1 rounded-xl bg-surface p-1">
                 {(["one_off", "monthly", "as_needed"] as const).map((k) => (
                   <button
@@ -324,7 +334,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
               </div>
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="ni-amount" className={fieldLabel}>{newItem.kind === "monthly" ? "Expected each month" : newItem.kind === "as_needed" ? "Usual amount (optional)" : "Planned amount (optional)"}</label>
-                <input id="ni-amount" inputMode="decimal" className={inputBox} value={newItem.amount} onChange={(e) => setNewItem({ ...newItem, amount: e.target.value })} />
+                <input id="ni-amount" inputMode="decimal" enterKeyHint="done" onKeyDown={createItemOnEnter} className={inputBox} value={newItem.amount} onChange={(e) => setNewItem({ ...newItem, amount: e.target.value })} />
                 <span className="text-xs text-muted-ink">
                   {newItem.kind === "as_needed"
                     ? `Fills in the amount when you pick it. Adds nothing to ${selectedCategory?.name}'s cap.`
