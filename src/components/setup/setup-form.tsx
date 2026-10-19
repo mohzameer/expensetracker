@@ -72,10 +72,12 @@ function initialState(data: Data): CatState[] {
 
 const field = "min-h-10 w-full rounded-[10px] border border-line-strong bg-surface px-2.5 text-[15px] outline-none focus:border-teal disabled:bg-paper";
 const label = "text-xs font-semibold text-muted-ink";
-/** Item rows: name · kind · amount · one action button. */
-const ITEM_GRID = "grid grid-cols-[minmax(0,1fr)_110px_110px_40px] gap-2 sm:grid-cols-[minmax(0,1fr)_124px_110px_40px]";
+/** Item rows: name · kind · amount · one action button. On a phone the name gets its own line, kind and amount go under it. */
+const ITEM_GRID =
+  "grid gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px] [grid-template-areas:'name_name_act'_'kind_amount_.'] sm:grid-cols-[minmax(0,1fr)_124px_110px_40px] sm:[grid-template-areas:'name_kind_amount_act']";
 /** A monthly row being removed shows two buttons (skip instead, undo). */
-const ITEM_GRID_TWO = "grid grid-cols-[minmax(0,1fr)_110px_110px_84px] gap-2 sm:grid-cols-[minmax(0,1fr)_124px_110px_84px]";
+const ITEM_GRID_TWO =
+  "grid gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_84px] [grid-template-areas:'name_name_act'_'kind_amount_.'] sm:grid-cols-[minmax(0,1fr)_124px_110px_84px] sm:[grid-template-areas:'name_kind_amount_act']";
 
 export function SetupForm({ data }: { data: Data }) {
   const initial = useMemo(() => initialState(data), [data]);
@@ -283,8 +285,9 @@ export function SetupForm({ data }: { data: Data }) {
             }
             return (
               <section key={c.key} className="card flex min-w-0 flex-col gap-3 rounded-2xl px-5 py-[18px]">
-                <div className="grid grid-cols-[28px_minmax(0,1fr)_minmax(0,130px)_72px_40px] items-end gap-2.5">
-                  <label className="relative mb-1.5 size-7 cursor-pointer rounded-lg" style={{ background: c.color }}>
+                {/* On a phone the cap and alert % go on a second line under the name. */}
+                <div className="grid grid-cols-[28px_minmax(0,1fr)_72px_40px] items-end gap-2.5 [grid-template-areas:'dot_name_name_del'_'._cap_alert_.'] sm:grid-cols-[28px_minmax(0,1fr)_minmax(0,130px)_72px_40px] sm:[grid-template-areas:'dot_name_cap_alert_del']">
+                  <label className="relative mb-1.5 size-7 cursor-pointer rounded-lg [grid-area:dot]" style={{ background: c.color }}>
                     <span className="sr-only">Colour for {c.name}</span>
                     <input
                       type="color"
@@ -293,11 +296,11 @@ export function SetupForm({ data }: { data: Data }) {
                       className="absolute inset-0 cursor-pointer opacity-0"
                     />
                   </label>
-                  <div className="flex min-w-0 flex-col gap-1">
+                  <div className="flex min-w-0 flex-col gap-1 [grid-area:name]">
                     <label htmlFor={`${c.key}-n`} className={label}>Category</label>
                     <input id={`${c.key}-n`} autoFocus={!c.id && !c.name} value={c.name} onChange={(e) => updateCat(c.key, { name: e.target.value })} className={field} />
                   </div>
-                  <div className="flex min-w-0 flex-col gap-1">
+                  <div className="flex min-w-0 flex-col gap-1 [grid-area:cap]">
                     <span className={cn(label, "truncate")}>{formatMonth(data.ym, { month: "short" })} cap ({symbol})</span>
                     <output
                       aria-label={`${c.name || "Category"} cap, the total of its items`}
@@ -306,7 +309,7 @@ export function SetupForm({ data }: { data: Data }) {
                       {formatAmount(cap)}
                     </output>
                   </div>
-                  <div className="flex flex-col gap-1">
+                  <div className="flex flex-col gap-1 [grid-area:alert]">
                     <label htmlFor={`${c.key}-p`} className={label}>Alert %</label>
                     <input
                       id={`${c.key}-p`}
@@ -322,7 +325,7 @@ export function SetupForm({ data }: { data: Data }) {
                     aria-label={`Archive ${c.name}`}
                     title="Archive"
                     onClick={() => (c.id ? updateCat(c.key, { removed: true }) : setCats((cs) => cs.filter((x) => x.key !== c.key)))}
-                    className="flex size-10 items-center justify-center rounded-[10px] border border-line text-muted-ink hover:text-bad"
+                    className="flex size-10 items-center justify-center rounded-[10px] border border-line text-muted-ink [grid-area:del] hover:text-bad"
                   >
                     <Archive aria-hidden className="size-4" />
                   </button>
@@ -339,7 +342,7 @@ export function SetupForm({ data }: { data: Data }) {
                 )}
                 <div className="flex flex-col gap-1.5 border-t border-line-soft pt-2.5">
                   {c.items.length > 0 && (
-                    <div className={cn(ITEM_GRID, "text-[11px] font-semibold tracking-wider text-muted-ink uppercase")}>
+                    <div className={cn(ITEM_GRID, "hidden text-[11px] font-semibold tracking-wider text-muted-ink uppercase sm:grid")}>
                       <span>Item</span>
                       <span>Kind</span>
                       <span className="text-right">Amount</span>
@@ -355,7 +358,7 @@ export function SetupForm({ data }: { data: Data }) {
                         value={i.name}
                         disabled={i.removed}
                         onChange={(e) => updateItem(c.key, i.key, { name: e.target.value })}
-                        className={cn(field, i.removed && "line-through opacity-50")}
+                        className={cn(field, "[grid-area:name]", i.removed && "line-through opacity-50")}
                       />
                       <select
                         aria-label={`Kind of ${i.name || "item"}`}
@@ -367,7 +370,7 @@ export function SetupForm({ data }: { data: Data }) {
                           updateItem(c.key, i.key, { kind, endYm: null });
                           setAsking(kind === "monthly" ? i.key : null);
                         }}
-                        className={cn(field, i.removed && "opacity-50")}
+                        className={cn(field, "[grid-area:kind]", i.removed && "opacity-50")}
                       >
                         <option value="one_off">One-off</option>
                         <option value="monthly">Monthly</option>
@@ -380,9 +383,9 @@ export function SetupForm({ data }: { data: Data }) {
                         value={i.amount}
                         disabled={i.removed}
                         onChange={(e) => updateItem(c.key, i.key, { amount: e.target.value })}
-                        className={cn(field, "text-right", i.kind === "monthly" && !parseMoney(i.amount) && !i.removed && "border-warn-bar", i.kind === "monthly" && i.skipped && !i.removed && "text-faint line-through", i.removed && "opacity-50")}
+                        className={cn(field, "text-right [grid-area:amount]", i.kind === "monthly" && !parseMoney(i.amount) && !i.removed && "border-warn-bar", i.kind === "monthly" && i.skipped && !i.removed && "text-faint line-through", i.removed && "opacity-50")}
                       />
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex items-center justify-end gap-1 [grid-area:act]">
                         {/* Offered once a monthly item is being removed: sit out this month instead of going for good.
                             On a skipped row it takes the remove button's place, to switch the skip off again. */}
                         {i.kind === "monthly" && (i.removed || i.skipped) && (
