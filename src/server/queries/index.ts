@@ -749,5 +749,6 @@ export async function getExportRows(db: Db, ym: string | null) {
 /** Setup → Capture bank texts: what the iPhone automation needs, and whether it's arriving. */
 export async function getMessagesGuide(db: Db) {
   const token = process.env.INGEST_TOKEN ?? null;
-  return { token, lastReceivedAt: await lastMessageAt(db) };
+  const [settings, lastReceivedAt] = await Promise.all([getSettings(db), lastMessageAt(db)]);
+  return { token, senders: settings.messageSenders, lastReceivedAt };
 }

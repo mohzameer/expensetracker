@@ -9,7 +9,7 @@ import { runAction } from "@/server/action";
 import { createCategory, createItem, saveSetup, setChartHiddenCategories } from "@/server/domain/catalog";
 import { assignCategory, createExpense, deleteExpense, updateExpense } from "@/server/domain/expenses";
 import { closeMonth } from "@/server/domain/months";
-import { dismissMessage, ingestMessage, logMessage, logTransfer, restoreMessage } from "@/server/domain/messages";
+import { dismissMessage, ingestMessage, logMessage, logTransfer, restoreMessage, setMessageSenders } from "@/server/domain/messages";
 import { adjustSavings, moveToCategory } from "@/server/domain/transfers";
 import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
 import {
@@ -151,5 +151,9 @@ export async function restoreMessageAction(id: string) {
 
 /** Setup guide's test box: the same path as the iPhone automation, without the token. */
 export async function testMessageAction(input: z.input<typeof s.testMessageInput>) {
-  return runAction(s.testMessageInput, input, (db, d) => ingestMessage(db, { text: d.text, sender: "Test", receivedOn: today() }));
+  return runAction(s.testMessageInput, input, (db, d) => ingestMessage(db, { text: d.text, sender: "Test", receivedOn: today(), anySender: true }));
+}
+
+export async function setMessageSendersAction(names: string[]) {
+  return runAction(s.messageSendersInput, names, (db, d) => setMessageSenders(db, d));
 }

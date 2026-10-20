@@ -42,6 +42,8 @@ export const settings = pgTable(
     periodStartDay: smallint().notNull().default(1),
     // Categories left out of the spending charts (e.g. big fixed payments), shared across devices.
     chartHiddenCategoryIds: uuid().array().notNull().default(sql`'{}'::uuid[]`),
+    // Bank texts are only kept from these senders (as Messages names them); empty = any sender.
+    messageSenders: text().array().notNull().default(sql`'{}'::text[]`),
   },
   () => [
     check("settings_singleton", sql`id = 1`),

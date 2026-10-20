@@ -2,8 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Check, Copy, Eye, EyeOff } from "lucide-react";
-import { testMessageAction } from "@/server/actions";
+import { AlertTriangle, Check, Copy, Eye, EyeOff, Plus, X } from "lucide-react";
+import { setMessageSendersAction, testMessageAction } from "@/server/actions";
 import type { ParsedSms } from "@/lib/sms";
 import { formatDay } from "@/lib/dates";
 import { formatAmount } from "@/lib/money";
@@ -17,7 +17,17 @@ const KIND: Record<ParsedSms["kind"], string> = {
 };
 
 /** `lastReceivedAt` comes formatted from the server, in the app's timezone. */
-export function MessagesGuide({ endpoint, token, lastReceivedAt }: { endpoint: string; token: string | null; lastReceivedAt: string | null }) {
+export function MessagesGuide({
+  endpoint,
+  token,
+  senders,
+  lastReceivedAt,
+}: {
+  endpoint: string;
+  token: string | null;
+  senders: string[];
+  lastReceivedAt: string | null;
+}) {
   return (
     <div className="flex flex-col gap-5">
       <section className="card flex flex-col gap-3 p-4">
@@ -38,6 +48,8 @@ export function MessagesGuide({ endpoint, token, lastReceivedAt }: { endpoint: s
           {lastReceivedAt ? `Last text received ${lastReceivedAt}.` : "No texts received yet."}
         </span>
       </section>
+
+      <SendersCard initial={senders} />
 
       <section className="card flex flex-col gap-3 p-4">
         <h2 className="eyebrow m-0">Set up the automation on your iPhone</h2>
@@ -72,14 +84,94 @@ export function MessagesGuide({ endpoint, token, lastReceivedAt }: { endpoint: s
             In Shortcuts you can duplicate the first one and just change the word.
           </li>
           <li>
-            That&apos;s it. One-time passwords, declined cards and account POS texts are ignored here, so a broad filter is safe, and the same
-            text arriving twice is only kept once.
+            That&apos;s it. Texts from senders that aren&apos;t on the allowed list, one-time passwords, declined cards and account POS texts
+            are ignored here, so a broad filter is safe, and the same text arriving twice is only kept once.
           </li>
         </ol>
       </section>
 
       <TestBox />
     </div>
+  );
+}
+
+/** Texts from anyone else are dropped on arrival. Saved on every change. */
+function SendersCard({ initial }: { initial: string[] }) {
+  const [list, setList] = useState(initial);
+  const [draft, setDraft] = useState("");
+  const [pending, start] = useTransition();
+
+  const save = (next: string[], done: string) =>
+    start(async () => {
+      const before = list;
+      setList(next);
+      const res = await setMessageSendersAction(next);
+      if (!res.ok) {
+        setList(before);
+        return void toast.error(res.error);
+      }
+      setList(res.data);
+      toast.success(done);
+    });
+
+  const add = () => {
+    const name = draft.trim();
+    if (!name) return;
+    const key = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (list.some((s) => s.toLowerCase().replace(/[^a-z0-9]/g, "") === key)) return void toast(`${name} is already on the list`);
+    setDraft("");
+    save([...list, name], `Texts from ${name} will be kept`);
+  };
+
+  return (
+    <section className="card flex flex-col gap-3 p-4">
+      <h2 className="eyebrow m-0">Allowed senders</h2>
+      <p className="m-0 text-[13px] text-muted-ink">
+        Only texts from these senders are kept; anything else your automation forwards is dropped. Use the name shown at the top of the
+        conversation in Messages. {list.length === 0 && <b className="text-warn">The list is empty, so texts from anyone are kept.</b>}
+      </p>
+      {list.length > 0 && (
+        <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
+          {list.map((s) => (
+            <li key={s} className="flex min-h-9 items-center gap-1 rounded-full border border-line bg-paper pr-1 pl-3 text-[14px] font-medium">
+              {s}
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => save(list.filter((x) => x !== s), `Texts from ${s} will be dropped`)}
+                aria-label={`Remove ${s}`}
+                className="flex size-7 items-center justify-center rounded-full text-muted-ink hover:bg-line-soft hover:text-ink"
+              >
+                <X aria-hidden className="size-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          add();
+        }}
+        className="flex gap-2"
+      >
+        <input
+          aria-label="Sender name"
+          value={draft}
+          maxLength={60}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="e.g. HNB"
+          className="min-h-11 min-w-0 flex-1 rounded-xl border border-line-strong bg-surface px-3 text-[15px] outline-none focus:border-teal"
+        />
+        <button
+          type="submit"
+          disabled={pending || !draft.trim()}
+          className="flex min-h-11 items-center gap-1 rounded-xl border border-line-strong bg-surface px-4 text-[15px] font-semibold disabled:opacity-40"
+        >
+          <Plus aria-hidden className="size-4" /> Add
+        </button>
+      </form>
+    </section>
   );
 }
 

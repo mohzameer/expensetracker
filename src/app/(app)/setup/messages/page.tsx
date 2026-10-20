@@ -29,6 +29,7 @@ export default async function MessagesSetupPage() {
       <MessagesGuide
         endpoint={`${proto}://${host}/api/messages`}
         token={data.token}
+        senders={data.senders}
         lastReceivedAt={
           data.lastReceivedAt?.toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: APP_TIMEZONE }) ?? null
         }

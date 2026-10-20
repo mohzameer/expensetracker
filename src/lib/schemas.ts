@@ -30,6 +30,7 @@ export const newExpenseInput = expenseInput;
 export const logMessageInput = z.object({ messageId: id, expense: newExpenseInput });
 /** A withdrawal or bank-transfer text, saved as a move between accounts (plus its charge). */
 export const logTransferInput = z.object({ messageId: id, fromId: id, toId: id, amount, fee: amount.nullable() });
+export const messageSendersInput = z.array(z.string().trim().min(1).max(60)).max(20);
 export const testMessageInput = z.object({ text: z.string().trim().min(1, "Paste a bank text first").max(2000) });
 
 export const newAccountInput = z.object({ name, opening: z.number().int().min(-1e13).max(1e13) });

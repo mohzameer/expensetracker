@@ -1,22 +1,42 @@
 import { createHash } from "node:crypto";
 import { and, desc, eq, max } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { capturedMessages, months } from "@/db/schema";
+import { capturedMessages, months, settings } from "@/db/schema";
 import { UserError } from "@/lib/errors";
 import { convertUsd, DEFAULT_USD_RATE } from "@/lib/money";
 import { parseBankSms, type MessageKind } from "@/lib/sms";
 import { addAccountAdjustment, transferBetweenAccounts } from "./accounts";
 import { createExpense, type ExpenseInput } from "./expenses";
+import { getSettings } from "./months";
 
 /** Bank texts the automation can send are short; anything longer isn't one. */
 export const MAX_MESSAGE_LENGTH = 2000;
 
-/** A text from the iPhone automation: dropped if it isn't a transaction, stored once otherwise. */
-export async function ingestMessage(db: Db, input: { text: string; sender?: string | null; receivedOn: string }) {
+/** "Amana Bank", "AMANABANK" and "amana-bank" are the same sender. */
+const senderKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** The allowed list is empty (anyone) or names this sender. */
+export function senderAllowed(allowed: string[], sender: string | null | undefined): boolean {
+  if (allowed.length === 0) return true;
+  const key = senderKey(sender ?? "");
+  return !!key && allowed.some((a) => senderKey(a) === key);
+}
+
+/**
+ * A text from the iPhone automation: dropped if it's from a sender not on the allowed list
+ * or isn't a transaction, stored once otherwise. `anySender` is for texts pasted into Setup.
+ */
+export async function ingestMessage(
+  db: Db,
+  input: { text: string; sender?: string | null; receivedOn: string; anySender?: boolean },
+) {
   const body = input.text.trim();
   if (body.length > MAX_MESSAGE_LENGTH) throw new UserError("That message is too long to be a bank text.");
+  if (!input.anySender && !senderAllowed((await getSettings(db)).messageSenders, input.sender)) {
+    return { ignored: true as const, reason: "sender" as const, duplicate: false, parsed: null };
+  }
   const parsed = parseBankSms(body, input.receivedOn);
-  if (!parsed) return { ignored: true as const, duplicate: false, parsed: null };
+  if (!parsed) return { ignored: true as const, reason: "not_a_transaction" as const, duplicate: false, parsed: null };
   const bodyHash = createHash("sha256").update(body.replace(/\s+/g, " ")).digest("hex");
   const [row] = await db
     .insert(capturedMessages)
@@ -130,6 +150,17 @@ export async function getPendingMessages(db: Db): Promise<PendingMessage[]> {
       body: m.body,
     };
   });
+}
+
+/** Setup: the senders whose texts are kept (empty = any). */
+export async function setMessageSenders(db: Db, names: string[]) {
+  const seen = new Set<string>();
+  const clean = names
+    .map((n) => n.trim())
+    .filter((n) => n && !seen.has(senderKey(n)) && seen.add(senderKey(n)));
+  await getSettings(db);
+  await db.update(settings).set({ messageSenders: clean }).where(eq(settings.id, 1));
+  return clean;
 }
 
 export async function lastMessageAt(db: Db): Promise<Date | null> {

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { accountEntries, capturedMessages, categoryBudgets, categoryMonthSummary, expenses, incomes, items, monthlyItemStatus, months, settings } from "@/db/schema";
-import { dismissMessage, getPendingMessages, ingestMessage, logMessage, logTransfer, restoreMessage } from "@/server/domain/messages";
+import { dismissMessage, getPendingMessages, ingestMessage, logMessage, logTransfer, restoreMessage, senderAllowed, setMessageSenders } from "@/server/domain/messages";
 import { closeBlockers, closeMonth, ensureMonth, getMonth, monthOfDate } from "@/server/domain/months";
 import { getSavingsBalance, moveToCategory } from "@/server/domain/transfers";
 import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
@@ -711,7 +711,7 @@ describe("bank texts", () => {
   const purchase = (where: string, amount: string, day = "12/09/26") =>
     `Dear Cardholder, Purchase at ${where} LK for ${amount} on ${day} 07:47 AM has been authorised on your debit card ending #0000.`;
   const trf = "IB CEFTS trf of LKR 25,000.00 & charge of LKR 25.00 (INT) debited from your A/C ***0001. Avail. Bal. LKR  433,558.50.";
-  const ingest = (text: string, receivedOn = "2026-09-20") => ingestMessage(db, { text, receivedOn });
+  const ingest = (text: string, receivedOn = "2026-09-20") => ingestMessage(db, { text, sender: "COMBANK", receivedOn });
   const status = async (id: string) => (await db.select().from(capturedMessages).where(eq(capturedMessages.id, id)))[0];
 
   it("keeps each transaction text once and drops the rest", async () => {
@@ -779,6 +779,23 @@ describe("bank texts", () => {
     const cash = await createAccount(db, { name: "Cash in hand", opening: 0, todayStr: "2026-09-01" });
     await logTransfer(db, { messageId: w.id, fromId: com.id, toId: cash.id, amount: w.amount!, fee: null, todayStr: "2026-09-25" });
     expect(await bal()).toMatchObject({ ComBank: rs(26000 - 9900), "Cash in hand": rs(9900) });
+  });
+
+  it("keeps texts only from the allowed senders", async () => {
+    expect(senderAllowed([], null)).toBe(true);
+    expect(senderAllowed(["COMBANK", "Amana Bank"], "AMANABANK")).toBe(true);
+    expect(senderAllowed(["COMBANK", "Amana Bank"], "ComBank")).toBe(true);
+    expect(senderAllowed(["COMBANK"], "HNB")).toBe(false);
+    expect(senderAllowed(["COMBANK"], null)).toBe(false);
+
+    expect(await setMessageSenders(db, [" COMBANK ", "Amana Bank", "amana-bank", ""])).toEqual(["COMBANK", "Amana Bank"]);
+    const text = purchase("SPICE LAND", "LKR 570.00");
+    expect(await ingestMessage(db, { text, sender: "Scammer", receivedOn: "2026-09-20" })).toMatchObject({ ignored: true, reason: "sender" });
+    expect(await ingestMessage(db, { text, receivedOn: "2026-09-20" })).toMatchObject({ ignored: true, reason: "sender" });
+    // Pasted into Setup's test box: any sender.
+    expect(await ingestMessage(db, { text, sender: "Test", receivedOn: "2026-09-20", anySender: true })).toMatchObject({ ignored: false });
+    expect(await ingestMessage(db, { text: trf, sender: "Amana Bank", receivedOn: "2026-09-20" })).toMatchObject({ ignored: false });
+    expect(await getPendingMessages(db)).toHaveLength(2);
   });
 
   it("dismissed texts leave the list and can come back", async () => {

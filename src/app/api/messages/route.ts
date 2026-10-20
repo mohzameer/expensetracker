@@ -33,7 +33,11 @@ export async function POST(request: NextRequest) {
 
   try {
     const res = await ingestMessage(await getDb(), { text, sender, receivedOn: today() });
-    if (res.ignored) return NextResponse.json({ ok: true, ignored: true });
+    if (res.ignored) {
+      // Shows in the Vercel logs, to see what name iOS gave a sender that was turned away.
+      if (res.reason === "sender") console.info(`Ignored a text from sender ${JSON.stringify(sender)}`);
+      return NextResponse.json({ ok: true, ignored: true, reason: res.reason });
+    }
     return NextResponse.json({ ok: true, duplicate: res.duplicate, kind: res.parsed.kind });
   } catch (e) {
     const message = toUserMessage(e);
