@@ -80,9 +80,12 @@ export function CreatableCombobox({ id, options, value, onChange, onCreate, empt
         <ChevronDown aria-hidden className="size-[18px] shrink-0 text-muted-ink" />
       </div>
       {open && (
+        // data-vaul-no-drag: on a phone the sheet is a swipe-to-close drawer; without it a swipe
+        // on the list drags the sheet instead of scrolling the list.
         <Command.List
+          data-vaul-no-drag
           onMouseDown={(e) => e.preventDefault()}
-          className="max-h-60 overflow-y-auto rounded-[14px] border border-line bg-surface p-1 shadow-[0_8px_24px_rgba(27,26,23,0.08)]"
+          className="max-h-60 overflow-y-auto overscroll-contain rounded-[14px] border border-line bg-surface p-1 shadow-[0_8px_24px_rgba(27,26,23,0.08)]"
         >
           {emptyOption && !q && (
             <Command.Item
