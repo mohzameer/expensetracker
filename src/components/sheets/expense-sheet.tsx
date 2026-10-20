@@ -242,7 +242,6 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
             Category
           </label>
           <CreatableCombobox
-            fullList
             id="category"
             options={categoryOptions}
             value={categoryId}
@@ -304,7 +303,6 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
             Item <span className="font-normal">(optional)</span>
           </label>
           <CreatableCombobox
-            fullList
             id="item"
             disabled={!categoryId}
             options={itemOptions}

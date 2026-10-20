@@ -19,19 +19,13 @@ type Props = {
   disabled?: boolean;
   badge?: ReactNode;
   invalid?: boolean;
-  /**
-   * Inside a sheet: show every option with no scroll box of its own (iOS won't reliably scroll a
-   * list nested in the phone drawer), and scroll the sheet so the list sits above the keyboard.
-   */
-  fullList?: boolean;
 };
 
 /** Type to filter; no match offers `+ Create "…"`. The list renders inline so it works inside sheets. */
-export function CreatableCombobox({ id, options, value, onChange, onCreate, emptyOption, placeholder, disabled, badge, fullList = false }: Props) {
+export function CreatableCombobox({ id, options, value, onChange, onCreate, emptyOption, placeholder, disabled, badge }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  const fieldRef = useRef<HTMLDivElement>(null);
   const selected = options.find((o) => o.value === value) ?? null;
   const q = query.trim();
   const exact = options.some((o) => o.label.toLowerCase() === q.toLowerCase());
@@ -54,7 +48,6 @@ export function CreatableCombobox({ id, options, value, onChange, onCreate, empt
   return (
     <Command shouldFilter={false} loop className="flex flex-col gap-1.5 overflow-visible bg-transparent">
       <div
-        ref={fieldRef}
         className={cn(
           "flex min-h-[52px] items-center gap-2.5 rounded-[14px] border bg-surface px-3.5 transition-colors",
           open ? "border-[1.5px] border-teal" : "border-line-strong",
@@ -71,8 +64,6 @@ export function CreatableCombobox({ id, options, value, onChange, onCreate, empt
           onFocus={() => {
             setOpen(true);
             setQuery("");
-            // After the phone keyboard has slid up.
-            if (fullList) setTimeout(() => scrollFieldToTop(fieldRef.current), 300);
           }}
           onBlur={() => setOpen(false)}
           onKeyDown={(e) => {
@@ -89,15 +80,12 @@ export function CreatableCombobox({ id, options, value, onChange, onCreate, empt
         <ChevronDown aria-hidden className="size-[18px] shrink-0 text-muted-ink" />
       </div>
       {open && (
-        // data-vaul-no-drag: on a phone the sheet is a swipe-to-close drawer; a swipe down while
-        // browsing the list shouldn't close it.
+        // data-vaul-no-drag: on a phone the sheet is a swipe-to-close drawer; without it a swipe
+        // on the list drags the sheet instead of scrolling the list.
         <Command.List
           data-vaul-no-drag
           onMouseDown={(e) => e.preventDefault()}
-          className={cn(
-            "rounded-[14px] border border-line bg-surface p-1 shadow-[0_8px_24px_rgba(27,26,23,0.08)]",
-            !fullList && "max-h-60 overflow-y-auto overscroll-contain",
-          )}
+          className="max-h-60 overflow-y-auto overscroll-contain rounded-[14px] border border-line bg-surface p-1 shadow-[0_8px_24px_rgba(27,26,23,0.08)]"
         >
           {emptyOption && !q && (
             <Command.Item
@@ -143,13 +131,4 @@ export function CreatableCombobox({ id, options, value, onChange, onCreate, empt
       )}
     </Command>
   );
-}
-
-/** Scroll the nearest scrolling ancestor (the sheet) so `el` sits at its top. */
-function scrollFieldToTop(el: HTMLElement | null) {
-  let box = el?.parentElement ?? null;
-  while (box && !(/(auto|scroll)/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight)) box = box.parentElement;
-  if (!el || !box) return;
-  const top = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 8;
-  box.scrollTo({ top, behavior: "smooth" });
 }
