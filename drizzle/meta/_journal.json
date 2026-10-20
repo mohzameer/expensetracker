@@ -134,6 +134,13 @@
       "when": 1792488467440,
       "tag": "0018_message_senders",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792496540820,
+      "tag": "0019_item_end_as_needed",
+      "breakpoints": true
     }
   ]
 }

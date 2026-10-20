@@ -4,7 +4,7 @@ import type { Db } from "@/db";
 import type { ItemKind } from "@/db/schema";
 import { accountEntries, accounts, categories, categoryBudgets, categoryMonthSummary, expenses, incomes, items, itemSkips, monthlyItemStatus, months } from "@/db/schema";
 import { getAccounts, totalBalance } from "@/server/domain/accounts";
-import { addDays, addMonths, diffDays, formatDay, formatRange, periodOf, periodStart, today, type Range } from "@/lib/dates";
+import { addDays, addMonths, APP_TIMEZONE, diffDays, formatDay, formatRange, periodOf, periodStart, today, type Range } from "@/lib/dates";
 import { stateAfter, type ItemPayment } from "@/lib/budget";
 import { DEFAULT_USD_RATE } from "@/lib/money";
 import { closeBlockers, currentYm, ensureMonth, getMonth, getSettings, monthOfDate, rangeOf, type Month } from "@/server/domain/months";
@@ -35,10 +35,11 @@ export type CatalogItem = {
   kind: ItemKind;
   expectedAmount: number | null;
   defaultAmount: number | null;
-  /** Monthly items: the last month it counts in; null = until stopped. */
+  /** Monthly and as-needed items: the last month it's offered in; null = until stopped. */
   endYm: string | null;
   /** Warn when it's about to be paid a second time in a calendar month. */
   warnTwice: boolean;
+  createdAt: Date;
 };
 
 export type DueItem = {
@@ -728,7 +729,18 @@ export async function getSetupPage(db: Db, ym: string) {
       alertPct: byCat.get(c.id)?.alertPct ?? null,
       items: catalog.items
         .filter((i) => i.categoryId === c.id)
-        .map((i) => ({ id: i.id, name: i.name, kind: i.kind, expectedAmount: i.expectedAmount, defaultAmount: i.defaultAmount, skipped: skipped.has(i.id), endYm: i.endYm, warnTwice: i.warnTwice })),
+        .map((i) => ({
+          id: i.id,
+          name: i.name,
+          kind: i.kind,
+          expectedAmount: i.expectedAmount,
+          defaultAmount: i.defaultAmount,
+          skipped: skipped.has(i.id),
+          endYm: i.endYm,
+          warnTwice: i.warnTwice,
+          // Removing it here then only ends it (earlier months keep it); see removeItemFrom.
+          startedBefore: !!month && i.kind !== "one_off" && today(APP_TIMEZONE, i.createdAt) < month.startsOn,
+        })),
     })),
   };
 }

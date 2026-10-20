@@ -22,10 +22,12 @@ type ItemState = {
   kind: Kind;
   amount: string;
   skipped: boolean;
-  /** Monthly items: the last month it counts in; null = until I stop. */
+  /** Monthly and as-needed items: the last month it's offered in; null = until I stop. */
   endYm: string | null;
   /** Warn in the expense sheet when it's about to be paid a second time in a calendar month. */
   warnTwice: boolean;
+  /** Around before this month: removing it only ends it, so earlier months keep it. */
+  startedBefore: boolean;
   removed: boolean;
 };
 type CatState = {
@@ -69,6 +71,7 @@ function initialState(data: Data): CatState[] {
       skipped: i.skipped,
       endYm: i.endYm,
       warnTwice: i.warnTwice,
+      startedBefore: i.startedBefore,
       removed: false,
     })),
   }));
@@ -192,7 +195,7 @@ export function SetupForm({ data }: { data: Data }) {
                 expectedAmount: i.kind === "monthly" ? amt : null,
                 defaultAmount: i.kind !== "monthly" ? amt : null,
                 skipped: i.kind === "monthly" && i.skipped,
-                endYm: i.kind === "monthly" ? i.endYm : null,
+                endYm: i.kind === "one_off" ? null : i.endYm,
                 warnTwice: i.kind !== "one_off" && i.warnTwice,
                 removed: i.removed,
               };
@@ -459,7 +462,10 @@ export function SetupForm({ data }: { data: Data }) {
                     </div>
                     {i.removed ? (
                       <span className="pl-2.5 text-xs text-muted-ink">
-                        Will be removed on save.{i.kind === "monthly" && ` To leave it out of ${monthName} only, use the calendar button.`}
+                        {i.startedBefore
+                          ? `Leaves the list from ${monthName} on when you save; earlier months keep it.`
+                          : "Will be removed on save."}
+                        {i.kind === "monthly" && ` To leave it out of ${monthName} only, use the calendar button.`}
                       </span>
                     ) : i.kind === "monthly" && i.skipped ? (
                       <span className="pl-2.5 text-xs font-medium text-warn">Skipped for {monthName} — back next month. Tap the calendar to include it again.</span>
@@ -489,7 +495,11 @@ export function SetupForm({ data }: { data: Data }) {
                               )}
                             </>
                           )}
-                          {i.kind === "as_needed" && !i.removed && "Every month, when it comes up · not in the cap"}
+                          {i.kind === "as_needed" &&
+                            !i.removed &&
+                            (i.endYm
+                              ? `When it comes up, until ${formatMonth(i.endYm, { month: "short", year: "numeric" })} · not in the cap`
+                              : "Every month, when it comes up · not in the cap")}
                           {i.kind !== "one_off" && !i.removed && (
                             <>
                               {" · "}
@@ -519,7 +529,7 @@ export function SetupForm({ data }: { data: Data }) {
                   <button
                     type="button"
                     onClick={() =>
-                      updateCat(c.key, { items: [...c.items, { key: newKey(), id: null, name: "", kind: "one_off", amount: "", skipped: false, endYm: null, warnTwice: false, removed: false }] })
+                      updateCat(c.key, { items: [...c.items, { key: newKey(), id: null, name: "", kind: "one_off", amount: "", skipped: false, endYm: null, warnTwice: false, startedBefore: false, removed: false }] })
                     }
                     className="flex min-h-10 items-center gap-1.5 self-start rounded-[10px] px-2.5 text-sm font-semibold text-teal hover:bg-teal-wash"
                   >

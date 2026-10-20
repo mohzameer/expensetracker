@@ -1,7 +1,7 @@
-import { and, asc, eq, gt, isNull, lt, max, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNotNull, isNull, lt, max, or, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { type ItemKind, categories, categoryBudgets, expenses, incomes, items, itemSkips, months, settings, transfers } from "@/db/schema";
-import { formatMonth } from "@/lib/dates";
+import { addMonths, APP_TIMEZONE, formatMonth, today } from "@/lib/dates";
 import { UserError } from "@/lib/errors";
 import { CATEGORY_COLORS } from "@/lib/palette";
 import { syncCaps } from "./caps";
@@ -41,12 +41,12 @@ export type NewItem = {
   ym: string;
 };
 
-/** Items offered in a month: the monthly items still running in it, every as-needed item, and the one-offs added for that month. */
+/** Items offered in a month: the monthly and as-needed items still running in it, and the one-offs added for that month. */
 export async function itemsForMonth(db: Db, monthId: string | null) {
-  const monthly = monthId
-    ? and(eq(items.kind, "monthly"), or(isNull(items.endYm), sql`${items.endYm} >= (select year_month from months where id = ${monthId})`))
-    : eq(items.kind, "monthly");
-  const running = or(monthly, eq(items.kind, "as_needed"));
+  const carried = or(eq(items.kind, "monthly"), eq(items.kind, "as_needed"));
+  const running = monthId
+    ? and(carried, or(isNull(items.endYm), sql`${items.endYm} >= (select year_month from months where id = ${monthId})`))
+    : carried;
   return db
     .select({
       id: items.id,
@@ -57,6 +57,7 @@ export async function itemsForMonth(db: Db, monthId: string | null) {
       defaultAmount: items.defaultAmount,
       endYm: items.endYm,
       warnTwice: items.warnTwice,
+      createdAt: items.createdAt,
     })
     .from(items)
     .where(and(isNull(items.archivedAt), monthId ? or(running, eq(items.monthId, monthId)) : running))
@@ -64,50 +65,93 @@ export async function itemsForMonth(db: Db, monthId: string | null) {
 }
 
 /**
- * A monthly item that already ran its course can be added again under the same name:
- * names are unique per category, so the ended item is restarted rather than duplicated.
- * The open months between its old end and `ym` are marked skipped, so restarting
- * doesn't put it back into them. Returns its id, or null when there is nothing to restart.
+ * A monthly or as-needed item that already ran its course can be added again under the same
+ * name: names are unique per category, so the ended item is restarted rather than duplicated.
+ * When it restarts as monthly, the open months between its old end and `ym` are marked
+ * skipped, so restarting doesn't put it back into them. Returns its id, or null when there
+ * is nothing to restart.
  */
-async function restartEnded(db: Db, categoryId: string, name: string, ym: string): Promise<string | null> {
+async function restartEnded(db: Db, categoryId: string, name: string, ym: string, kind: ItemKind): Promise<string | null> {
   const [ended] = await db
     .select({ id: items.id, endYm: items.endYm })
     .from(items)
     .where(
-      and(eq(items.categoryId, categoryId), eq(items.kind, "monthly"), isNull(items.archivedAt), sql`lower(${items.name}) = ${name.trim().toLowerCase()}`, lt(items.endYm, ym)),
+      and(
+        eq(items.categoryId, categoryId),
+        or(eq(items.kind, "monthly"), eq(items.kind, "as_needed")),
+        isNull(items.archivedAt),
+        sql`lower(${items.name}) = ${name.trim().toLowerCase()}`,
+        lt(items.endYm, ym),
+      ),
     );
   if (!ended) return null;
-  const gap = await db.select({ id: months.id }).from(months).where(and(gt(months.yearMonth, ended.endYm!), lt(months.yearMonth, ym), eq(months.status, "open")));
-  if (gap.length) await db.insert(itemSkips).values(gap.map((m) => ({ itemId: ended.id, monthId: m.id }))).onConflictDoNothing();
+  if (kind === "monthly") {
+    const gap = await db.select({ id: months.id }).from(months).where(and(gt(months.yearMonth, ended.endYm!), lt(months.yearMonth, ym), eq(months.status, "open")));
+    if (gap.length) await db.insert(itemSkips).values(gap.map((m) => ({ itemId: ended.id, monthId: m.id }))).onConflictDoNothing();
+  }
   return ended.id;
+}
+
+/**
+ * A removed (archived) item with this name in the same slot (category, and month for one-offs).
+ * Its name is still taken, so adding it again brings it back, history and all.
+ */
+async function archivedNamed(db: Db, categoryId: string, name: string, monthId: string | null): Promise<string | null> {
+  const [row] = await db
+    .select({ id: items.id })
+    .from(items)
+    .where(
+      and(
+        eq(items.categoryId, categoryId),
+        isNotNull(items.archivedAt),
+        sql`lower(${items.name}) = ${name.trim().toLowerCase()}`,
+        monthId ? eq(items.monthId, monthId) : isNull(items.monthId),
+      ),
+    );
+  return row?.id ?? null;
 }
 
 export async function createItem(db: Db, input: NewItem) {
   if (input.kind === "monthly" && !input.expectedAmount) throw new UserError("Monthly items need an expected amount.");
-  if (input.kind === "monthly") {
-    const restarted = await restartEnded(db, input.categoryId, input.name, input.ym);
-    if (restarted) {
-      const [item] = await db.update(items).set({ expectedAmount: input.expectedAmount, endYm: null }).where(eq(items.id, restarted)).returning();
-      await syncCaps(db, input.categoryId);
-      return item;
-    }
-  }
   const monthId = input.kind === "one_off" ? (await ensureMonth(db, input.ym)).id : null;
   const [{ top }] = await db.select({ top: max(items.sortOrder) }).from(items).where(eq(items.categoryId, input.categoryId));
-  const [item] = await db
-    .insert(items)
-    .values({
-      categoryId: input.categoryId,
-      name: input.name.trim(),
-      kind: input.kind,
-      expectedAmount: input.kind === "monthly" ? input.expectedAmount : null,
-      defaultAmount: input.kind !== "monthly" ? (input.defaultAmount ?? null) : null,
-      monthId,
-      sortOrder: (top ?? -1) + 1,
-    })
-    .returning();
+  const values = {
+    name: input.name.trim(),
+    kind: input.kind,
+    expectedAmount: input.kind === "monthly" ? input.expectedAmount : null,
+    defaultAmount: input.kind !== "monthly" ? (input.defaultAmount ?? null) : null,
+    monthId,
+    endYm: null,
+    sortOrder: (top ?? -1) + 1,
+  };
+  // The same name ended in an earlier month, or removed: bring that item back.
+  const restarted = input.kind !== "one_off" ? await restartEnded(db, input.categoryId, input.name, input.ym, input.kind) : null;
+  if (restarted) {
+    const [item] = await db.update(items).set({ ...values, sortOrder: undefined }).where(eq(items.id, restarted)).returning();
+    await syncCaps(db, input.categoryId);
+    return item;
+  }
+  const archived = await archivedNamed(db, input.categoryId, input.name, monthId);
+  const [item] = archived
+    ? await db.update(items).set({ ...values, archivedAt: null }).where(eq(items.id, archived)).returning()
+    : await db.insert(items).values({ ...values, categoryId: input.categoryId }).returning();
   await syncCaps(db, input.categoryId); // a new item raises its category's cap
   return item;
+}
+
+/**
+ * Removing an item in a month's Setup. A monthly or as-needed item that was already around
+ * before this month ends after the previous month, so earlier months keep it; anything
+ * added during this month (and every one-off, which only belongs to its month) is removed.
+ */
+export async function removeItemFrom(db: Db, id: string, month: { yearMonth: string; startsOn: string }) {
+  const [it] = await db.select({ kind: items.kind, createdAt: items.createdAt }).from(items).where(eq(items.id, id));
+  if (!it) return;
+  if (it.kind !== "one_off" && today(APP_TIMEZONE, it.createdAt) < month.startsOn) {
+    await db.update(items).set({ endYm: addMonths(month.yearMonth, -1) }).where(eq(items.id, id));
+  } else {
+    await removeItem(db, id);
+  }
 }
 
 /** Items with history are archived; unused ones are deleted. */
@@ -250,7 +294,7 @@ export async function saveSetup(db: Db, p: SetupPayload) {
         });
 
       const removedItems = c.items.filter((i) => i.removed && i.id).map((i) => i.id!);
-      for (const id of removedItems) await removeItem(tx, id);
+      for (const id of removedItems) await removeItemFrom(tx, id, month);
 
       let itemOrder = 0;
       for (const it of c.items) {
@@ -263,8 +307,8 @@ export async function saveSetup(db: Db, p: SetupPayload) {
           defaultAmount: it.kind !== "monthly" ? it.defaultAmount : null,
           // One-offs belong to this month; switching an item to monthly or as-needed makes it carry over.
           monthId: it.kind === "one_off" ? month.id : null,
-          // How long a monthly item runs. Other kinds never have an end month.
-          ...(it.kind !== "monthly" ? { endYm: null } : it.endYm !== undefined ? { endYm: it.endYm } : {}),
+          // How long a monthly or as-needed item runs. One-offs never have an end month.
+          ...(it.kind === "one_off" ? { endYm: null } : it.endYm !== undefined ? { endYm: it.endYm } : {}),
           ...(it.warnTwice !== undefined ? { warnTwice: it.warnTwice } : {}),
           sortOrder: itemOrder++,
         };
@@ -272,9 +316,18 @@ export async function saveSetup(db: Db, p: SetupPayload) {
           throw new UserError(`${it.name}: it can't stop before ${formatMonth(p.ym, { month: "long" })}.`);
         }
         let itemId = it.id;
-        if (!itemId && it.kind === "monthly") itemId = await restartEnded(tx, categoryId, it.name, p.ym);
-        if (itemId) await tx.update(items).set(values).where(and(eq(items.id, itemId), eq(items.categoryId, categoryId)));
-        else [{ id: itemId }] = await tx.insert(items).values({ ...values, categoryId }).returning({ id: items.id });
+        if (!itemId && it.kind !== "one_off") itemId = await restartEnded(tx, categoryId, it.name, p.ym, it.kind);
+        const restored = !itemId ? await archivedNamed(tx, categoryId, it.name, values.monthId) : null;
+        if (restored) itemId = restored;
+        if (itemId) {
+          // Switching kind starts its duration afresh (as the form does).
+          const [prev] = await tx.select({ kind: items.kind }).from(items).where(eq(items.id, itemId));
+          const set = prev && prev.kind !== it.kind ? { ...values, endYm: null } : values;
+          await tx
+            .update(items)
+            .set(restored ? { ...set, archivedAt: null } : set)
+            .where(and(eq(items.id, itemId), eq(items.categoryId, categoryId)));
+        } else [{ id: itemId }] = await tx.insert(items).values({ ...values, categoryId }).returning({ id: items.id });
         // Skipping is per month and only means something for a monthly item.
         if (it.kind === "monthly" && it.skipped) {
           await tx.insert(itemSkips).values({ itemId: itemId!, monthId: month.id }).onConflictDoNothing();

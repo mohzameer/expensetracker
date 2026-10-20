@@ -1,0 +1,2 @@
+ALTER TABLE "items" DROP CONSTRAINT "items_end_ym";--> statement-breakpoint
+ALTER TABLE "items" ADD CONSTRAINT "items_end_ym" CHECK (end_ym is null or (kind in ('monthly', 'as_needed') and end_ym ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'));

@@ -8,7 +8,7 @@ import { getSavingsBalance, moveToCategory } from "@/server/domain/transfers";
 import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
 import { assignCategory, createExpense, updateExpense } from "@/server/domain/expenses";
 import { addAccountAdjustment, createAccount, deleteAccountAdjustment, getAccounts, setAccountBalance, transferBetweenAccounts } from "@/server/domain/accounts";
-import { createItem, itemsForMonth, removeCategory, saveSetup, setChartHiddenCategories } from "@/server/domain/catalog";
+import { createItem, itemsForMonth, removeCategory, removeItem, saveSetup, setChartHiddenCategories } from "@/server/domain/catalog";
 import { getDashboard, getDayView, getMonthlyItems, getUnplanned } from "@/server/queries";
 import { freshDb, rs, seedSeptember } from "./helpers";
 
@@ -805,5 +805,72 @@ describe("bank texts", () => {
     expect(await getPendingMessages(db)).toEqual([]);
     await restoreMessage(db, m.id);
     expect((await getPendingMessages(db)).map((x) => x.id)).toEqual([m.id]);
+  });
+});
+
+describe("removing items per month", () => {
+  const setup = (ym: string, categoryId: string, list: { id: string | null; name: string; kind: "monthly" | "as_needed" | "one_off"; expectedAmount?: number | null; removed?: boolean }[]) =>
+    saveSetup(db, {
+      ym, defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR",
+      categories: [{
+        id: categoryId, name: "Groceries", color: "#2F7D6D", alertPct: null, removed: false,
+        items: list.map((i) => ({ expectedAmount: null, defaultAmount: null, removed: false, ...i })),
+      }],
+    });
+  const names = async (ym: string) => (await itemsForMonth(db, (await getMonth(db, ym))!.id)).map((i) => i.name);
+
+  it("removing an older item in a later month ends it there; earlier months keep it", async () => {
+    const s = await seedSeptember(db);
+    const damro = await createItem(db, { categoryId: s.groceries.id, name: "Damro", kind: "as_needed", ym: "2026-09" });
+    await db.update(items).set({ createdAt: new Date("2026-09-01T00:00:00Z") });
+    await s.expense(s.groceries.id, rs(2000), "2026-09-05", damro.id);
+    await ensureMonth(db, "2026-10");
+    await ensureMonth(db, "2026-11");
+
+    // Setup for November: remove Damro and the monthly Shop.
+    await setup("2026-11", s.groceries.id, [
+      { id: s.shop.id, name: "Shop", kind: "monthly", expectedAmount: rs(30000), removed: true },
+      { id: damro.id, name: "Damro", kind: "as_needed", removed: true },
+    ]);
+    const [row] = await db.select().from(items).where(eq(items.id, damro.id));
+    expect(row).toMatchObject({ endYm: "2026-10", archivedAt: null });
+    expect(await names("2026-10")).toEqual(expect.arrayContaining(["Damro", "Shop"]));
+    expect(await names("2026-11")).not.toContain("Damro");
+    expect(await names("2026-11")).not.toContain("Shop");
+
+    // Out of November's plan, so not offered when logging in November.
+    const offeredIn = async (date: string) => (await getDayView(db, date)).catalog.items.map((i) => i.id);
+    expect(await offeredIn("2026-11-10")).not.toContain(damro.id);
+    expect(await offeredIn("2026-10-10")).toContain(damro.id);
+
+    // Typing the name again (Setup or the expense sheet) brings the same item back, with its expense.
+    const back = await createItem(db, { categoryId: s.groceries.id, name: "damro", kind: "as_needed", ym: "2026-11" });
+    expect(back).toMatchObject({ id: damro.id, endYm: null });
+    expect(await offeredIn("2026-11-10")).toContain(damro.id);
+    expect(await db.select().from(expenses).where(eq(expenses.itemId, damro.id))).toHaveLength(1);
+  });
+
+  it("an item added this month, or a one-off, is removed outright", async () => {
+    const s = await seedSeptember(db);
+    await ensureMonth(db, "2026-10");
+    const fresh = await createItem(db, { categoryId: s.groceries.id, name: "Arpico", kind: "as_needed", ym: "2026-10" });
+    await db.update(items).set({ createdAt: new Date("2026-10-05T00:00:00Z") }).where(eq(items.id, fresh.id));
+    const once = await createItem(db, { categoryId: s.groceries.id, name: "Singer", kind: "one_off", ym: "2026-10" });
+    await setup("2026-10", s.groceries.id, [
+      { id: fresh.id, name: "Arpico", kind: "as_needed", removed: true },
+      { id: once.id, name: "Singer", kind: "one_off", removed: true },
+    ]);
+    expect(await db.select().from(items).where(eq(items.id, fresh.id))).toEqual([]);
+    expect(await db.select().from(items).where(eq(items.id, once.id))).toEqual([]);
+  });
+
+  it("re-adding a removed (archived) item's name brings it back with its history", async () => {
+    const s = await seedSeptember(db);
+    const old = await createItem(db, { categoryId: s.groceries.id, name: "Cargills", kind: "as_needed", ym: "2026-09" });
+    await s.expense(s.groceries.id, rs(500), "2026-09-05", old.id);
+    await removeItem(db, old.id); // used, so archived rather than deleted
+    expect(await names("2026-09")).not.toContain("Cargills");
+    const back = await createItem(db, { categoryId: s.groceries.id, name: "Cargills", kind: "as_needed", ym: "2026-09" });
+    expect(back).toMatchObject({ id: old.id, archivedAt: null });
   });
 });

@@ -187,7 +187,8 @@ export const items = pgTable(
     check("items_monthly_expected", sql`kind <> 'monthly' or expected_amount is not null`),
     check("items_expected_positive", sql`expected_amount is null or expected_amount > 0`),
     check("items_default_positive", sql`default_amount is null or default_amount > 0`),
-    check("items_end_ym", sql`end_ym is null or (kind = 'monthly' and end_ym ~ '^[0-9]{4}-(0[1-9]|1[0-2])$')`),
+    // The last month a monthly or as-needed item is offered in (removed from later months in Setup).
+    check("items_end_ym", sql`end_ym is null or (kind in ('monthly', 'as_needed') and end_ym ~ '^[0-9]{4}-(0[1-9]|1[0-2])$')`),
   ],
 );
 
