@@ -3,6 +3,7 @@ import { unsealData } from "iron-session";
 import { SESSION_COOKIE, sessionOptions, type SessionData } from "@/lib/session";
 
 // Optimistic check only: pages and actions verify the session themselves.
+// /api/messages is left out: the iPhone automation has no cookie and sends a token instead.
 export async function proxy(request: NextRequest) {
   const cookie = request.cookies.get(SESSION_COOKIE)?.value;
   if (cookie) {
@@ -16,5 +17,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!login|_next/static|_next/image|favicon.ico|icon|apple-icon|manifest.webmanifest).*)"],
+  matcher: ["/((?!login|api/messages|_next/static|_next/image|favicon.ico|icon|apple-icon|manifest.webmanifest).*)"],
 };

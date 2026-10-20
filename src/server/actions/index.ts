@@ -9,6 +9,7 @@ import { runAction } from "@/server/action";
 import { createCategory, createItem, saveSetup, setChartHiddenCategories } from "@/server/domain/catalog";
 import { assignCategory, createExpense, deleteExpense, updateExpense } from "@/server/domain/expenses";
 import { closeMonth } from "@/server/domain/months";
+import { dismissMessage, ingestMessage, logMessage, logTransfer, restoreMessage } from "@/server/domain/messages";
 import { adjustSavings, moveToCategory } from "@/server/domain/transfers";
 import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
 import {
@@ -128,4 +129,27 @@ export async function setDefaultAccountAction(accountId: string) {
 
 export async function setChartHiddenCategoriesAction(ids: string[]) {
   return runAction(z.array(s.id).max(500), ids, (db, d) => setChartHiddenCategories(db, d));
+}
+
+// ---- bank texts ----
+
+export async function logMessageAction(input: z.input<typeof s.logMessageInput>) {
+  return runAction(s.logMessageInput, input, (db, d) => logMessage(db, d));
+}
+
+export async function logTransferAction(input: z.input<typeof s.logTransferInput>) {
+  return runAction(s.logTransferInput, input, (db, d) => logTransfer(db, { ...d, todayStr: today() }));
+}
+
+export async function dismissMessageAction(id: string) {
+  return runAction(s.id, id, (db, d) => dismissMessage(db, d));
+}
+
+export async function restoreMessageAction(id: string) {
+  return runAction(s.id, id, (db, d) => restoreMessage(db, d));
+}
+
+/** Setup guide's test box: the same path as the iPhone automation, without the token. */
+export async function testMessageAction(input: z.input<typeof s.testMessageInput>) {
+  return runAction(s.testMessageInput, input, (db, d) => ingestMessage(db, { text: d.text, sender: "Test", receivedOn: today() }));
 }

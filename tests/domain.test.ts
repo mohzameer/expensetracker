@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { categoryBudgets, categoryMonthSummary, expenses, incomes, items, monthlyItemStatus, months, settings } from "@/db/schema";
+import { accountEntries, capturedMessages, categoryBudgets, categoryMonthSummary, expenses, incomes, items, monthlyItemStatus, months, settings } from "@/db/schema";
+import { dismissMessage, getPendingMessages, ingestMessage, logMessage, logTransfer, restoreMessage } from "@/server/domain/messages";
 import { closeBlockers, closeMonth, ensureMonth, getMonth, monthOfDate } from "@/server/domain/months";
 import { getSavingsBalance, moveToCategory } from "@/server/domain/transfers";
 import { receiveIncome, undoReceiveIncome } from "@/server/domain/incomes";
@@ -703,5 +704,89 @@ describe("account adjustments", () => {
     await expect(addAccountAdjustment(db, { accountId: com.id, amount: rs(5), reason: " ", todayStr: "2026-09-30" })).rejects.toThrow(/reason/);
     await deleteAccountAdjustment(db, fee.id);
     expect(await balance()).toBe(rs(1250));
+  });
+});
+
+describe("bank texts", () => {
+  const purchase = (where: string, amount: string, day = "12/09/26") =>
+    `Dear Cardholder, Purchase at ${where} LK for ${amount} on ${day} 07:47 AM has been authorised on your debit card ending #0000.`;
+  const trf = "IB CEFTS trf of LKR 25,000.00 & charge of LKR 25.00 (INT) debited from your A/C ***0001. Avail. Bal. LKR  433,558.50.";
+  const ingest = (text: string, receivedOn = "2026-09-20") => ingestMessage(db, { text, receivedOn });
+  const status = async (id: string) => (await db.select().from(capturedMessages).where(eq(capturedMessages.id, id)))[0];
+
+  it("keeps each transaction text once and drops the rest", async () => {
+    expect(await ingest(purchase("SPICE LAND", "LKR 570.00"))).toMatchObject({ ignored: false, duplicate: false });
+    expect(await ingest(purchase("SPICE LAND", "LKR 570.00"))).toMatchObject({ ignored: false, duplicate: true });
+    expect(await ingest("Your OTP is 000000")).toMatchObject({ ignored: true });
+    expect(await db.select().from(capturedMessages)).toHaveLength(1);
+  });
+
+  it("logs a purchase as an expense on the text's date, once", async () => {
+    const s = await seedSeptember(db);
+    const com = await createAccount(db, { name: "ComBank", opening: rs(10000), todayStr: "2026-09-01" });
+    await ingest(purchase("UBER EATS CBH", "LKR 1,321.76"));
+    const [m] = await getPendingMessages(db);
+    expect(m).toMatchObject({ kind: "purchase", merchant: "UBER EATS CBH", amount: 132176, occurredOn: "2026-09-12" });
+
+    const expense = { spentOn: m.occurredOn, categoryId: s.dining.id, itemId: null, amount: m.amount!, note: m.merchant, accountId: com.id };
+    const res = await logMessage(db, { messageId: m.id, expense });
+    expect(res.category?.remaining).toBe(rs(12000) - 132176);
+    expect(await status(m.id)).toMatchObject({ status: "logged", expenseId: res.expense.id });
+    expect(await getPendingMessages(db)).toEqual([]);
+    await expect(logMessage(db, { messageId: m.id, expense })).rejects.toThrow(/already been dealt with/);
+    expect(await db.select().from(expenses).where(eq(expenses.spentOn, "2026-09-12"))).toHaveLength(1);
+  });
+
+  it("converts dollar charges at the rate of the text's month", async () => {
+    await seedSeptember(db);
+    expect((await getMonth(db, "2026-09"))!.usdRate).toBe(33000);
+    await ingest(purchase("HBOMax help.hbomax.com SG", "USD 4.99"));
+    expect((await getPendingMessages(db))[0]).toMatchObject({ amount: 164670, usdRate: 33000, foreignAmount: 499 });
+
+    await saveSetup(db, { ym: "2026-09", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR", categories: [], usdRate: 30000 });
+    expect((await getPendingMessages(db))[0]).toMatchObject({ amount: 149700, usdRate: 30000 });
+    // A new month starts from the previous month's rate; the old month keeps its own.
+    expect((await ensureMonth(db, "2026-10")).usdRate).toBe(30000);
+    await saveSetup(db, { ym: "2026-10", defaultAlertPct: 10, currencySymbol: "Rs", currencyCode: "LKR", categories: [], usdRate: 31000 });
+    expect((await getMonth(db, "2026-09"))!.usdRate).toBe(30000);
+    expect((await getPendingMessages(db))[0].amount).toBe(149700);
+  });
+
+  it("moves a bank transfer between accounts on the day it arrived, with its charge", async () => {
+    await seedSeptember(db);
+    const com = await createAccount(db, { name: "ComBank", opening: rs(1000), todayStr: "2026-09-01" });
+    const amana = await createAccount(db, { name: "Amana", opening: rs(100000), todayStr: "2026-09-01" });
+    const bal = async () => Object.fromEntries((await getAccounts(db)).map((a) => [a.name, a.balance]));
+    await ingest(trf);
+    await ingest("Withdrawal at HNB MT LAVINI LK for LKR 9,900.00 on 14/09/26 08:06 AM from card ending #0000.");
+    const pending = await getPendingMessages(db);
+    const t = pending.find((m) => m.kind === "bank_transfer")!;
+    const w = pending.find((m) => m.kind === "withdrawal")!;
+    expect(t).toMatchObject({ amount: rs(25000), fee: rs(25), accountRef: "0001", occurredOn: "2026-09-20" });
+
+    await logTransfer(db, { messageId: t.id, fromId: amana.id, toId: com.id, amount: t.amount!, fee: t.fee, todayStr: "2026-09-25" });
+    expect(await bal()).toEqual({ ComBank: rs(1000 + 25000), Amana: rs(100000 - 25000 - 25) });
+    const entries = await db.select().from(accountEntries).where(eq(accountEntries.accountId, amana.id));
+    expect(entries.filter((e) => e.kind !== "opening").map((e) => [e.occurredOn, e.kind, e.amount])).toEqual(
+      expect.arrayContaining([
+        ["2026-09-20", "transfer", -rs(25000)],
+        ["2026-09-20", "adjustment", -rs(25)],
+      ]),
+    );
+    expect((await status(t.id)).status).toBe("logged");
+
+    // Without the charge: only the move.
+    const cash = await createAccount(db, { name: "Cash in hand", opening: 0, todayStr: "2026-09-01" });
+    await logTransfer(db, { messageId: w.id, fromId: com.id, toId: cash.id, amount: w.amount!, fee: null, todayStr: "2026-09-25" });
+    expect(await bal()).toMatchObject({ ComBank: rs(26000 - 9900), "Cash in hand": rs(9900) });
+  });
+
+  it("dismissed texts leave the list and can come back", async () => {
+    await ingest(purchase("CARGILLS", "LKR 3,959.37"));
+    const [m] = await getPendingMessages(db);
+    await dismissMessage(db, m.id);
+    expect(await getPendingMessages(db)).toEqual([]);
+    await restoreMessage(db, m.id);
+    expect((await getPendingMessages(db)).map((x) => x.id)).toEqual([m.id]);
   });
 });

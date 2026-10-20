@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatAmount, formatMoney, parseMoney, toInputValue } from "@/lib/money";
+import { convertUsd, formatAmount, formatMoney, parseMoney, toInputValue } from "@/lib/money";
+import { parseBankSms } from "@/lib/sms";
 import { budgetState, paidInCalendarMonth, stateAfter } from "@/lib/budget";
 import { addDays, addMonths, clampToMonth, diffMonths, isIsoDate, lastDay, relativeDay, today } from "@/lib/dates";
 import { cycleGrid, groupByDay, inRange, itemKey, monthBuckets, monthOfRange, presetRange, rangeBars, rowKey, searchRows, topItems, type ItemRef, type Row, type Search } from "@/lib/analysis";
@@ -237,5 +238,83 @@ describe("month arithmetic", () => {
     expect(diffMonths("2026-09", "2026-09")).toBe(0);
     expect(diffMonths("2027-02", "2026-11")).toBe(3);
     expect(diffMonths(addMonths("2026-09", 11), "2026-09")).toBe(11);
+  });
+});
+
+describe("bank sms", () => {
+  const got = "2026-10-20";
+  const card = (s: string) => `Dear Cardholder, ${s} has been authorised on your debit card ending #0000.`;
+
+  it("reads card purchases in rupees", () => {
+    expect(parseBankSms(card("Purchase at SPICE LAND RESTURANT DEHIWALA LK for LKR 570.00 on 20/10/26 07:47 AM"), got)).toEqual({
+      kind: "purchase",
+      merchant: "SPICE LAND RESTURANT DEHIWALA",
+      amount: 57000,
+      fee: null,
+      foreignCurrency: null,
+      foreignAmount: null,
+      accountRef: null,
+      occurredOn: "2026-10-20",
+    });
+    const uber = parseBankSms(card("Purchase at UBER EATS CBH LK for LKR 1,321.76 on 19/10/26 04:57 PM"), got);
+    expect(uber).toMatchObject({ merchant: "UBER EATS CBH", amount: 132176, occurredOn: "2026-10-19" });
+    const cafe = parseBankSms(card("Purchase at CORNE-FA CAFE & BAKERS DEHIWALA LK for LKR 100.00 on 19/10/26 07:27 AM"), got);
+    expect(cafe).toMatchObject({ merchant: "CORNE-FA CAFE & BAKERS DEHIWALA", amount: 10000 });
+    const cargills = parseBankSms(card("Purchase at CARGILLS FOODCITY-MT.L MT.LAVINIA LK for LKR 3,959.37 on 17/10/26 06:53 PM"), got);
+    expect(cargills).toMatchObject({ merchant: "CARGILLS FOODCITY-MT.L MT.LAVINIA", amount: 395937, occurredOn: "2026-10-17" });
+  });
+
+  it("keeps foreign charges in their currency", () => {
+    const hbo = parseBankSms(card("Purchase at HBOMax help.hbomax.com SG SG for USD 4.99 on 18/10/26 01:56 PM"), got);
+    expect(hbo).toMatchObject({ kind: "purchase", merchant: "HBOMax help.hbomax.com", amount: null, foreignCurrency: "USD", foreignAmount: 499 });
+    expect(convertUsd(499, 33000)).toBe(164670);
+    expect(convertUsd(499, 30000)).toBe(149700);
+    expect(convertUsd(1, 33333)).toBe(333);
+  });
+
+  it("reads ATM withdrawals", () => {
+    expect(
+      parseBankSms("Withdrawal at Hatton National Bank HNB MT LAVINI LK for LKR 9,900.00 on 14/10/26 08:06 AM from card ending #0000.", got),
+    ).toMatchObject({ kind: "withdrawal", merchant: "Hatton National Bank HNB MT LAVINI", amount: 990000, occurredOn: "2026-10-14" });
+    expect(
+      parseBankSms(
+        "Withdrawal at MT LAVINIA-1 BR MOUNT LAVINIACOLK for LKR 19,900.00 on 13/10/26 11:28 AM from card ending #0000. Click link to view the Digital Receipt for Withdrawal performed at ComBank ATMs",
+        got,
+      ),
+    ).toMatchObject({ kind: "withdrawal", merchant: "MT LAVINIA-1 BR MOUNT LAVINIACOLK", amount: 1990000, occurredOn: "2026-10-13" });
+  });
+
+  it("reads internet-banking transfers with their charge, dated the day they arrived", () => {
+    const trf = (n: string, bal: string) =>
+      `IB CEFTS trf of LKR ${n} & charge of LKR 25.00 (INT) debited from your A/C ***0001. Avail. Bal. LKR  ${bal}. Enq 0110000000`;
+    expect(parseBankSms(trf("25,000.00", "433,558.50"), got)).toEqual({
+      kind: "bank_transfer",
+      merchant: null,
+      amount: 2500000,
+      fee: 2500,
+      foreignCurrency: null,
+      foreignAmount: null,
+      accountRef: "0001",
+      occurredOn: got,
+    });
+    expect(parseBankSms(trf("20,000.00", "458,583.50"), got)).toMatchObject({ amount: 2000000, fee: 2500 });
+  });
+
+  it("drops OTPs, declined cards and account POS debits", () => {
+    const drop = [
+      "Dear Cardholder, your card was declined due to insufficient funds. The attempted transaction amount was LKR 21,915.00 at DAMRO-DEHIWELA DEHIWELA LK on 18/10/26 10:39 AM. Please check your balance and try again.",
+      "Dear Cardholder, Your card was declined due to insufficient funds. The attempted transaction amount was LKR 9,900.00 at Hatton National Bank HNB MT LAVINI LK on 14/10/26 08:04 AM. Please check your balance and try again.",
+      "Dear Cardholder, please verify the merchant name and transaction amount before entering the One Time Password (OTP). Keep your OTP confidential and do not share it with anyone. Your OTP at Merchant 'NDB' for LKR 5,024.00 is 000000",
+      "Your OTP is 000000",
+      "OTP is confidential. Do not share with anyone.Contact 0110000000 if you did not request for an OTP",
+      "POS trx of LKR 21,915.00 at DAMRO-DEHIWELA DEHIWELA LK authorised from your A/C ***0001. Avail. Bal. LKR 478,608.50. Enq 0110000000",
+      "   ",
+    ];
+    for (const text of drop) expect(parseBankSms(text, got)).toBeNull();
+  });
+
+  it("keeps anything else, with whatever amount it can find", () => {
+    expect(parseBankSms("Your standing order of Rs. 4,500 was processed", got)).toMatchObject({ kind: "other", amount: 450000, merchant: null });
+    expect(parseBankSms("Something happened on your account", got)).toMatchObject({ kind: "other", amount: null, occurredOn: got });
   });
 });

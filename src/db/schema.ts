@@ -19,6 +19,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { messageKinds } from "../lib/sms";
 
 // All money is stored as integer minor units (cents). Balances are never stored;
 // they are derived from rows through the views at the bottom of this file.
@@ -95,12 +96,15 @@ export const months = pgTable(
     status: text({ enum: ["open", "closed"] }).notNull().default("open"),
     closedAt: timestamp({ withTimezone: true }),
     defaultAlertPct: smallint().notNull().default(10),
+    // Rs (minor units) per US$1 for card charges in dollars; new months copy the previous one.
+    usdRate: money().notNull().default(33000),
   },
   (t) => [
     uniqueIndex("months_starts_on_idx").on(t.startsOn),
     check("months_range", sql`ends_on > starts_on`),
     check("months_year_month_format", sql`year_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
     check("months_status", sql`status in ('open', 'closed')`),
+    check("months_usd_rate_positive", sql`usd_rate > 0`),
     check("months_alert_pct", sql`default_alert_pct between 0 and 100`),
   ],
 );
@@ -211,6 +215,40 @@ export const expenses = pgTable(
     index("expenses_spent_on_idx").on(t.spentOn),
     index("expenses_category_spent_on_idx").on(t.categoryId, t.spentOn),
     index("expenses_item_spent_on_idx").on(t.itemId, t.spentOn),
+  ],
+);
+
+export const capturedMessageStatuses = ["pending", "logged", "dismissed"] as const;
+
+/**
+ * Bank SMS forwarded by the iPhone automation, waiting to be logged as an expense or
+ * an account transfer. Nothing here counts toward balances until it is logged.
+ */
+export const capturedMessages = pgTable(
+  "captured_messages",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    body: text().notNull(),
+    sender: text(),
+    bodyHash: text().notNull().unique(), // the same text twice (a retried Shortcut) is one message
+    kind: text({ enum: messageKinds }).notNull(),
+    merchant: text(),
+    amount: money(),
+    fee: money(),
+    foreignCurrency: text(),
+    foreignAmount: money(),
+    accountRef: text(),
+    occurredOn: date({ mode: "string" }).notNull(),
+    status: text({ enum: capturedMessageStatuses }).notNull().default("pending"),
+    expenseId: uuid().references(() => expenses.id, { onDelete: "set null" }),
+    transferGroup: uuid(),
+    receivedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp({ withTimezone: true }),
+  },
+  (t) => [
+    check("captured_messages_kind", sql`kind in ('purchase', 'withdrawal', 'bank_transfer', 'other')`),
+    check("captured_messages_status", sql`status in ('pending', 'logged', 'dismissed')`),
+    index("captured_messages_status_idx").on(t.status, t.receivedAt),
   ],
 );
 

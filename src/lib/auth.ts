@@ -19,6 +19,11 @@ export async function requireSession() {
 export function passcodeMatches(input: string): boolean {
   const expected = process.env.APP_PASSCODE;
   if (!expected) throw new Error("APP_PASSCODE is not set");
+  return secretMatches(input, expected);
+}
+
+/** Constant-time comparison of a secret (hashing first makes the lengths equal). */
+export function secretMatches(input: string, expected: string): boolean {
   const a = createHash("sha256").update(input).digest();
   const b = createHash("sha256").update(expected).digest();
   return timingSafeEqual(a, b);

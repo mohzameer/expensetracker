@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, gt, gte, isNull, lt, lte } from "drizzle-orm
 import type { Db } from "@/db/client";
 import { categories, categoryBudgets, categoryMonthSummary, expenses, incomes, months, settings, transfers } from "@/db/schema";
 import { addDays, addMonths, formatDay, formatMonth, periodEnd, periodOf, periodStart, today, type Range } from "@/lib/dates";
-import { formatMoney } from "@/lib/money";
+import { DEFAULT_USD_RATE, formatMoney } from "@/lib/money";
 import { UserError } from "@/lib/errors";
 import { syncCaps } from "./caps";
 
@@ -71,7 +71,7 @@ export async function ensureMonth(db: Db, ym: string): Promise<Month> {
 
     const [month] = await tx
       .insert(months)
-      .values({ yearMonth: ym, startsOn, endsOn, defaultAlertPct: source?.defaultAlertPct ?? s.defaultAlertPct })
+      .values({ yearMonth: ym, startsOn, endsOn, defaultAlertPct: source?.defaultAlertPct ?? s.defaultAlertPct, usdRate: source?.usdRate ?? DEFAULT_USD_RATE })
       .onConflictDoNothing()
       .returning();
     if (!month) return (await getMonth(tx, ym))!;

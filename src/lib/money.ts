@@ -12,6 +12,14 @@ export function parseMoney(input: string): number | null {
   return Number.isSafeInteger(minor) ? minor : null;
 }
 
+/** Rs 330 per US$1, until a month says otherwise. */
+export const DEFAULT_USD_RATE = 33000;
+
+/** US cents at a rate in minor units per $1 (33000 = Rs 330) → minor units: 499 at 33000 → 164670. */
+export function convertUsd(cents: number, rateMinor: number): number {
+  return Math.round((cents * rateMinor) / MINOR);
+}
+
 const grouped = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
 /** 1240000 → "12,400"; 180050 → "1,800.50". Negative values keep their sign. */

@@ -6,9 +6,11 @@ import { accountEntries, accounts, categories, categoryBudgets, categoryMonthSum
 import { getAccounts, totalBalance } from "@/server/domain/accounts";
 import { addDays, addMonths, diffDays, formatDay, formatRange, periodOf, periodStart, today, type Range } from "@/lib/dates";
 import { stateAfter, type ItemPayment } from "@/lib/budget";
+import { DEFAULT_USD_RATE } from "@/lib/money";
 import { closeBlockers, currentYm, ensureMonth, getMonth, getSettings, monthOfDate, rangeOf, type Month } from "@/server/domain/months";
 import { itemsForMonth } from "@/server/domain/catalog";
 import { getSavingsBalance } from "@/server/domain/transfers";
+import { getPendingMessages, lastMessageAt } from "@/server/domain/messages";
 
 export type CategorySummary = {
   categoryId: string;
@@ -200,7 +202,7 @@ export async function getDayView(db: Db, date: string) {
   // Calendar months around the budget month: the sheet's date can move a little either side of it.
   const paymentsFrom = `${addMonths(range.from.slice(0, 7), -1)}-01`;
   const paymentsTo = `${addMonths(range.to.slice(0, 7), 2)}-01`;
-  const [accountList, settings, summaries, catalog, monthly, dayExpenses, count, savings, monthSpend, warnPayments] = await Promise.all([
+  const [accountList, settings, summaries, catalog, monthly, dayExpenses, count, savings, monthSpend, warnPayments, messages] = await Promise.all([
     getAccounts(db),
     getSettings(db),
     getSummaries(db, month),
@@ -225,6 +227,7 @@ export async function getDayView(db: Db, date: string) {
       .from(expenses)
       .innerJoin(items, eq(items.id, expenses.itemId))
       .where(and(eq(items.warnTwice, true), gte(expenses.spentOn, paymentsFrom), lt(expenses.spentOn, paymentsTo))),
+    getPendingMessages(db),
   ]);
 
   const allocated = summaries.reduce((a, s) => a + s.effectiveAllocation, 0);
@@ -244,6 +247,8 @@ export async function getDayView(db: Db, date: string) {
     warnPayments: warnPayments as ItemPayment[],
     expenses: dayExpenses as ExpenseRow[],
     inboxCount: count,
+    /** Bank texts from the iPhone waiting to be logged (every day, not just this one). */
+    messages,
     savings,
     accounts: accountList,
     defaultAccountId: settings.defaultAccountId,
@@ -709,6 +714,7 @@ export async function getSetupPage(db: Db, ym: string) {
     currencySymbol: settings.currencySymbol,
     currencyCode: settings.currencyCode,
     defaultAlertPct: month?.defaultAlertPct ?? settings.defaultAlertPct,
+    usdRate: month?.usdRate ?? DEFAULT_USD_RATE,
     plan,
     planBase,
     accounts: accountList,
@@ -739,3 +745,9 @@ export async function getExportRows(db: Db, ym: string | null) {
     .orderBy(asc(expenses.spentOn), asc(expenses.createdAt))) as ExpenseRow[];
 }
 
+
+/** Setup → Capture bank texts: what the iPhone automation needs, and whether it's arriving. */
+export async function getMessagesGuide(db: Db) {
+  const token = process.env.INGEST_TOKEN ?? null;
+  return { token, lastReceivedAt: await lastMessageAt(db) };
+}

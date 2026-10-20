@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Archive, CalendarOff, Lock, Plus, Undo2, X } from "lucide-react";
+import { Archive, CalendarOff, ChevronRight, Lock, MessageSquareText, Plus, Undo2, X } from "lucide-react";
 import { MonthHeader } from "@/components/page-header";
 import { saveSetupAction } from "@/server/actions";
 import type { ItemKind } from "@/db/schema";
@@ -89,6 +90,7 @@ export function SetupForm({ data }: { data: Data }) {
   const [currency, setCurrency] = useState(`${data.currencySymbol}|${data.currencyCode}`);
   const [defaultAccount, setDefaultAccount] = useState(data.defaultAccountId ?? "");
   const [startDay, setStartDay] = useState(String(data.periodStartDay));
+  const [usdRate, setUsdRate] = useState(toInputValue(data.usdRate));
   const [pending, start] = useTransition();
   // The row whose "For how long?" strip is open. Kept out of the form state: opening it changes nothing.
   const [asking, setAsking] = useState<string | null>(null);
@@ -107,7 +109,8 @@ export function SetupForm({ data }: { data: Data }) {
     defaultAlert !== String(data.defaultAlertPct) ||
     currency !== `${data.currencySymbol}|${data.currencyCode}` ||
     defaultAccount !== (data.defaultAccountId ?? "") ||
-    startDay !== String(data.periodStartDay);
+    startDay !== String(data.periodStartDay) ||
+    usdRate !== toInputValue(data.usdRate);
 
   const updateCat = (key: string, patch: Partial<CatState>) => setCats((cs) => cs.map((c) => (c.key === key ? { ...c, ...patch } : c)));
   const updateItem = (catKey: string, itemKey: string, patch: Partial<ItemState>) =>
@@ -158,6 +161,8 @@ export function SetupForm({ data }: { data: Data }) {
         if (i.amount && parseMoney(i.amount) == null) return void toast.error(`${i.name}: the amount isn't valid.`);
       }
     }
+    const rate = parseMoney(usdRate);
+    if (!rate) return void toast.error("Enter a USD rate above zero.");
     const names = live.map((c) => c.name.trim().toLowerCase());
     if (new Set(names).size !== names.length) return void toast.error("Two categories have the same name.");
 
@@ -169,6 +174,7 @@ export function SetupForm({ data }: { data: Data }) {
         currencyCode: code,
         defaultAccountId: defaultAccount || null,
         periodStartDay: Math.min(Math.max(Number(startDay) || 1, 1), 28),
+        usdRate: rate,
         categories: cats
           .filter((c) => c.id || !c.removed)
           .map((c) => ({
@@ -207,6 +213,10 @@ export function SetupForm({ data }: { data: Data }) {
             Everything on one page. Categories and monthly items carry into every month; one-off items are for {monthName} only;
             as-needed items are there every month for when they come up. A category&apos;s cap is the total of its monthly and one-off items.
           </span>
+          <Link href="/setup/messages" className="flex w-fit items-center gap-1 text-sm font-semibold text-teal">
+            <MessageSquareText aria-hidden className="size-4" /> Capture bank texts from your iPhone
+            <ChevronRight aria-hidden className="size-4" />
+          </Link>
         </div>
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex flex-col gap-1">
@@ -244,6 +254,21 @@ export function SetupForm({ data }: { data: Data }) {
               className={cn(field, "w-[100px]")}
             />
             <span id="startday-hint" className="sr-only">Applies to months not created yet</span>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="usdrate" className={label} title={`For card charges in US dollars during ${monthName}`}>
+              {symbol} per US$1
+            </label>
+            <input
+              id="usdrate"
+              inputMode="decimal"
+              disabled={readOnly}
+              value={usdRate}
+              onChange={(e) => setUsdRate(e.target.value.replace(/[^\d.]/g, "").slice(0, 9))}
+              aria-describedby="usdrate-hint"
+              className={cn(field, "w-[100px]")}
+            />
+            <span id="usdrate-hint" className="sr-only">For card charges in US dollars during {monthName}</span>
           </div>
           {data.accounts.length > 0 && (
             <div className="flex flex-col gap-1">
@@ -546,6 +571,7 @@ export function SetupForm({ data }: { data: Data }) {
                 setCats(initial);
                 setDefaultAccount(data.defaultAccountId ?? "");
                 setStartDay(String(data.periodStartDay));
+                setUsdRate(toInputValue(data.usdRate));
                 setDefaultAlert(String(data.defaultAlertPct));
                 setCurrency(`${data.currencySymbol}|${data.currencyCode}`);
               }}

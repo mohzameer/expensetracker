@@ -61,10 +61,10 @@ export async function setAccountBalance(db: Db, input: { accountId: string; actu
   });
 }
 
-/** Move money between two of your accounts. */
+/** Move money between two of your accounts (dated today unless `occurredOn` says otherwise). */
 export async function transferBetweenAccounts(
   db: Db,
-  input: { fromId: string; toId: string; amount: number; todayStr: string; note?: string | null },
+  input: { fromId: string; toId: string; amount: number; todayStr: string; occurredOn?: string; note?: string | null },
 ) {
   if (input.fromId === input.toId) throw new UserError("Pick two different accounts.");
   return db.transaction(async (tx) => {
@@ -74,10 +74,10 @@ export async function transferBetweenAccounts(
     const group = crypto.randomUUID();
     const note = input.note?.trim() || null;
     await tx.insert(accountEntries).values([
-      { accountId: from.accountId, occurredOn: input.todayStr, amount: -input.amount, kind: "transfer", note: note ?? `To ${to.name}`, transferGroup: group },
-      { accountId: to.accountId, occurredOn: input.todayStr, amount: input.amount, kind: "transfer", note: note ?? `From ${from.name}`, transferGroup: group },
+      { accountId: from.accountId, occurredOn: input.occurredOn ?? input.todayStr, amount: -input.amount, kind: "transfer", note: note ?? `To ${to.name}`, transferGroup: group },
+      { accountId: to.accountId, occurredOn: input.occurredOn ?? input.todayStr, amount: input.amount, kind: "transfer", note: note ?? `From ${from.name}`, transferGroup: group },
     ]);
-    return { from: from.name, to: to.name };
+    return { from: from.name, to: to.name, group };
   });
 }
 
@@ -89,14 +89,14 @@ export async function setDefaultAccount(db: Db, accountId: string) {
 /** A + or − adjustment to an account with its reason (interest, bank charges, cash you forgot…). */
 export async function addAccountAdjustment(
   db: Db,
-  input: { accountId: string; amount: number; reason: string; todayStr: string },
+  input: { accountId: string; amount: number; reason: string; todayStr: string; occurredOn?: string },
 ) {
   if (input.amount === 0) throw new UserError("Enter an amount above zero.");
   if (!input.reason.trim()) throw new UserError("Give a reason for the adjustment.");
   const account = await balanceOf(db, input.accountId);
   const [row] = await db
     .insert(accountEntries)
-    .values({ accountId: input.accountId, occurredOn: input.todayStr, amount: input.amount, kind: "adjustment", note: input.reason.trim() })
+    .values({ accountId: input.accountId, occurredOn: input.occurredOn ?? input.todayStr, amount: input.amount, kind: "adjustment", note: input.reason.trim() })
     .returning();
   return { id: row.id, name: account.name };
 }

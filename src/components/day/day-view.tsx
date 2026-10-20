@@ -4,11 +4,21 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { BarChart3, Check, ChevronDown, ChevronLeft, ChevronRight, Lock, Plus, Wallet } from "lucide-react";
+import { BarChart3, Check, ChevronDown, ChevronLeft, ChevronRight, Lock, Plus, Wallet, X } from "lucide-react";
 import { ExpenseSheet, type ExpensePayload, type ExpenseSheetMode } from "@/components/sheets/expense-sheet";
 import { CoverSheet } from "@/components/sheets/cover-sheet";
-import { createExpenseAction, deleteExpenseAction, updateExpenseAction } from "@/server/actions";
+import { MoveSheet, type MovePayload } from "@/components/sheets/move-sheet";
+import {
+  createExpenseAction,
+  deleteExpenseAction,
+  dismissMessageAction,
+  logMessageAction,
+  logTransferAction,
+  restoreMessageAction,
+  updateExpenseAction,
+} from "@/server/actions";
 import type { CategorySummary, DayView as DayData, DueItem, ExpenseRow } from "@/server/queries";
+import type { PendingMessage } from "@/server/domain/messages";
 import { stateAfter } from "@/lib/budget";
 import { addDays, formatDay, formatMonth, relativeDay } from "@/lib/dates";
 import { formatAmount, formatMoney } from "@/lib/money";
@@ -26,7 +36,13 @@ export function DayView({ data }: { data: DayData }) {
     return state.filter((e) => e.id !== op.id);
   });
 
+  // Bank texts leave the list as soon as they're logged or dismissed.
+  const [messages, hideMessage] = useOptimistic(data.messages, (state: PendingMessage[], id: string) => state.filter((m) => m.id !== id));
+  const purchases = messages.filter((m) => m.kind === "purchase" || m.kind === "other");
+  const moves = messages.filter((m) => m.kind === "withdrawal" || m.kind === "bank_transfer");
+
   const [sheet, setSheet] = useState<{ open: boolean; key: number; mode: ExpenseSheetMode }>({ open: false, key: 0, mode: { kind: "add" } });
+  const [move, setMove] = useState<{ open: boolean; key: number; message: PendingMessage | null }>({ open: false, key: 0, message: null });
   const [cover, setCover] = useState<{ open: boolean; key: number; categoryId: string | null }>({ open: false, key: 0, categoryId: null });
 
   const openSheet = (mode: ExpenseSheetMode) => setSheet((s) => ({ open: true, key: s.key + 1, mode }));
@@ -52,13 +68,17 @@ export function DayView({ data }: { data: DayData }) {
   };
 
   const onSubmit = (payload: ExpensePayload, id?: string) => {
+    const messageId = sheet.mode.kind === "add" ? sheet.mode.message?.id : undefined;
     setSheet((s) => ({ ...s, open: false }));
     startTransition(async () => {
       if (id) applyOptimistic({ type: "update", row: toRow(payload, id) });
       else if (payload.spentOn === data.date) applyOptimistic({ type: "add", row: toRow(payload, `pending-${Date.now()}`) });
+      if (messageId) hideMessage(messageId);
       const res = id
         ? await updateExpenseAction({ id, expense: payload })
-        : await createExpenseAction(payload);
+        : messageId
+          ? await logMessageAction({ messageId, expense: payload })
+          : await createExpenseAction(payload);
       if (!res.ok) return void toast.error(res.error);
       const c = res.data.category;
       if (!c) {
@@ -72,6 +92,43 @@ export function DayView({ data }: { data: DayData }) {
       } else {
         toast.success(`Saved · ${formatMoney(c.remaining, data.currency)} left in ${c.name}`);
       }
+    });
+  };
+
+  const logMessage = (m: PendingMessage) =>
+    openSheet({
+      kind: "add",
+      prefill: { amount: m.amount, spentOn: m.occurredOn, note: messageNote(m) },
+      message: { id: m.id, body: m.body },
+    });
+
+  const onMove = (payload: MovePayload) => {
+    setMove((s) => ({ ...s, open: false }));
+    startTransition(async () => {
+      hideMessage(payload.messageId);
+      const res = await logTransferAction(payload);
+      if (!res.ok) return void toast.error(res.error);
+      toast.success(
+        `Moved ${formatMoney(payload.amount, data.currency)} from ${res.data.from} to ${res.data.to}` +
+          (payload.fee ? ` · ${formatMoney(payload.fee, data.currency)} charge recorded` : ""),
+      );
+    });
+  };
+
+  const onDismiss = (m: PendingMessage) => {
+    startTransition(async () => {
+      hideMessage(m.id);
+      const res = await dismissMessageAction(m.id);
+      if (!res.ok) return void toast.error(res.error);
+      toast("Text dismissed", {
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            const back = await restoreMessageAction(m.id);
+            if (!back.ok) toast.error(back.error);
+          },
+        },
+      });
     });
   };
 
@@ -212,8 +269,36 @@ export function DayView({ data }: { data: DayData }) {
       </header>
 
       <main className="flex flex-1 flex-col gap-[18px] px-4 pt-1 pb-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:px-0">
-        {!closed && (due.length > 0 || paid.length > 0) && (
+        {!closed && (due.length > 0 || paid.length > 0 || messages.length > 0) && (
           <div className="flex flex-col gap-[18px] lg:order-2">
+            {purchases.length > 0 && (
+              <FoldSection
+                id="message-list"
+                title={`From messages · ${purchases.length}`}
+                summary={formatMoney(purchases.reduce((a, m) => a + (m.amount ?? 0), 0), data.currency)}
+              >
+                {purchases.map((m) => (
+                  <MessageRow key={m.id} message={m} action="Log" onAction={() => logMessage(m)} onDismiss={() => onDismiss(m)} />
+                ))}
+              </FoldSection>
+            )}
+            {moves.length > 0 && (
+              <FoldSection
+                id="transfer-list"
+                title={`Transfers · ${moves.length}`}
+                summary={formatMoney(moves.reduce((a, m) => a + (m.amount ?? 0), 0), data.currency)}
+              >
+                {moves.map((m) => (
+                  <MessageRow
+                    key={m.id}
+                    message={m}
+                    action="Move"
+                    onAction={() => setMove((s) => ({ open: true, key: s.key + 1, message: m }))}
+                    onDismiss={() => onDismiss(m)}
+                  />
+                ))}
+              </FoldSection>
+            )}
             {due.length > 0 && (
               <FoldSection
                 id="due-list"
@@ -339,6 +424,18 @@ export function DayView({ data }: { data: DayData }) {
           onDelete={onDelete}
         />
       )}
+      {!closed && move.message && (
+        <MoveSheet
+          key={`move-${move.key}`}
+          open={move.open}
+          onOpenChange={(open) => setMove((s) => ({ ...s, open }))}
+          message={move.message}
+          accounts={data.accounts}
+          defaultAccountId={data.defaultAccountId}
+          currency={data.currency}
+          onSubmit={onMove}
+        />
+      )}
       {!closed && coverTarget && (
         <CoverSheet
           key={`cover-${cover.key}`}
@@ -379,6 +476,62 @@ function FoldSection({ id, title, summary, children }: { id: string; title: stri
         {children}
       </ul>
     </section>
+  );
+}
+
+/** The expense note for a bank text: the merchant, plus the dollar amount and rate it was converted at. */
+function messageNote(m: PendingMessage): string | null {
+  const parts = [m.merchant, m.usdRate && m.foreignAmount ? `USD ${formatAmount(m.foreignAmount)} @ ${formatAmount(m.usdRate)}` : null];
+  return parts.filter(Boolean).join(" · ").slice(0, 200) || null;
+}
+
+function MessageRow({
+  message: m,
+  action,
+  onAction,
+  onDismiss,
+}: {
+  message: PendingMessage;
+  action: string;
+  onAction: () => void;
+  onDismiss: () => void;
+}) {
+  const transfer = m.kind === "withdrawal" || m.kind === "bank_transfer";
+  const title = m.kind === "withdrawal" ? "Cash withdrawal" : m.kind === "bank_transfer" ? "Bank transfer" : (m.merchant ?? "Bank text");
+  const detail =
+    m.kind === "other"
+      ? m.body
+      : transfer
+        ? (m.merchant ?? (m.accountRef ? `A/C ••${m.accountRef}` : null))
+        : m.foreignCurrency && m.foreignAmount != null
+          ? `${m.foreignCurrency} ${formatAmount(m.foreignAmount)}${m.usdRate ? ` @ ${formatAmount(m.usdRate)}` : ""}`
+          : null;
+  const subtitle = [formatDay(m.occurredOn, { day: "numeric", month: "short" }), detail].filter(Boolean).join(" · ");
+  return (
+    <li className="flex items-center gap-3 py-2.5 pr-2 pl-3.5">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-[15px] font-medium">{title}</span>
+        <span className="truncate text-xs text-muted-ink">{subtitle}</span>
+      </div>
+      <div className="flex flex-col items-end gap-0.5">
+        <span className={cn("text-[15px] font-medium", m.amount == null && "text-muted-ink")}>{m.amount == null ? "—" : formatAmount(m.amount)}</span>
+        {!!m.fee && <span className="text-[11px] text-muted-ink">+{formatAmount(m.fee)} charge</span>}
+      </div>
+      <button
+        onClick={onAction}
+        className="min-h-9 rounded-full border border-teal px-3.5 text-sm font-semibold text-teal hover:bg-teal-wash"
+      >
+        {action}
+      </button>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label={`Dismiss ${title}`}
+        className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-ink hover:bg-paper hover:text-ink"
+      >
+        <X aria-hidden className="size-4" />
+      </button>
+    </li>
   );
 }
 

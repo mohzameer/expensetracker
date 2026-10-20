@@ -28,6 +28,7 @@ Open http://localhost:3000 and sign in with `APP_PASSCODE`.
 | `APP_PASSCODE` | What you type on the login screen. |
 | `SESSION_SECRET` | 32+ random characters for the session cookie (`openssl rand -base64 32`). |
 | `APP_TIMEZONE` | Timezone used for "today" (default `Asia/Colombo`). |
+| `INGEST_TOKEN` | Optional. 32+ random characters that let an iPhone Shortcuts automation post bank texts to `/api/messages`. |
 
 `npm run db:seed:demo` seeds last month (closed) plus sample spending for this month — useful for trying the app against a throwaway database.
 
@@ -71,3 +72,5 @@ drizzle/            migrations; 0001 adds the views and closed-month triggers
 ## Deploying
 
 Deploy to Vercel (or any Node host) with the same environment variables, and run `npm run db:migrate` against the production database. On a phone, open the site and use **Add to Home Screen** — it installs as a standalone app.
+
+To capture bank texts from an iPhone, set `INGEST_TOKEN` and follow **Setup → Capture bank texts from your iPhone** (`/setup/messages`) in the app. It shows the URL and token to paste into a Shortcuts automation and has a box to test a text.

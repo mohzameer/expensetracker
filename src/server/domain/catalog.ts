@@ -185,6 +185,8 @@ export type SetupPayload = {
   defaultAccountId?: string | null;
   /** Day budget months start on (1–28). Only months created afterwards use it. */
   periodStartDay?: number;
+  /** Rs (minor units) per US$1 for this month's dollar card charges. */
+  usdRate?: number;
 };
 
 /** Setup's single "Save all": everything in one transaction. */
@@ -194,7 +196,10 @@ export async function saveSetup(db: Db, p: SetupPayload) {
     assertOpen(month);
 
     await tx.update(settings).set({ currencySymbol: p.currencySymbol, currencyCode: p.currencyCode }).where(eq(settings.id, 1));
-    await tx.update(months).set({ defaultAlertPct: p.defaultAlertPct }).where(eq(months.id, month.id));
+    await tx
+      .update(months)
+      .set({ defaultAlertPct: p.defaultAlertPct, ...(p.usdRate !== undefined && { usdRate: p.usdRate }) })
+      .where(eq(months.id, month.id));
 
     if (p.periodStartDay !== undefined) {
       await tx.update(settings).set({ periodStartDay: p.periodStartDay }).where(eq(settings.id, 1));

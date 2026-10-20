@@ -42,7 +42,12 @@ export type ExpensePayload = {
 };
 
 export type ExpenseSheetMode =
-  | { kind: "add"; prefill?: { categoryId?: string | null; itemId?: string | null; amount?: number | null } }
+  | {
+      kind: "add";
+      prefill?: { categoryId?: string | null; itemId?: string | null; amount?: number | null; spentOn?: string; note?: string | null };
+      /** Logging a bank text from the iPhone: its id, and the text to show above the form. */
+      message?: { id: string; body: string };
+    }
   | { kind: "edit"; expense: ExpenseRow };
 
 type Props = {
@@ -63,13 +68,15 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
   const original = mode.kind === "edit" ? mode.expense : null;
   const prefill = mode.kind === "add" ? mode.prefill : undefined;
 
-  const [date, setDate] = useState(original?.spentOn ?? initialDate);
+  const message = mode.kind === "add" ? mode.message : undefined;
+  const [date, setDate] = useState(original?.spentOn ?? prefill?.spentOn ?? initialDate);
   const [categoryId, setCategoryId] = useState<string | null>(original?.categoryId ?? prefill?.categoryId ?? null);
   const [itemId, setItemId] = useState<string | null>(original?.itemId ?? prefill?.itemId ?? null);
   const [amountStr, setAmountStr] = useState(toInputValue(original?.amount ?? prefill?.amount ?? null));
   // Once you type an amount (or are editing a saved one), picking an item no longer replaces it.
-  const [amountTyped, setAmountTyped] = useState(!!original);
-  const [note, setNote] = useState(original?.note ?? "");
+  // A bank text's amount is what was actually charged, so it counts as typed too.
+  const [amountTyped, setAmountTyped] = useState(!!original || (!!message && prefill?.amount != null));
+  const [note, setNote] = useState(original?.note ?? prefill?.note ?? "");
   // New expenses default to the chosen default account (ComBank); edits keep what was saved.
   const [accountId, setAccountId] = useState<string | null>(
     original?.accountId ?? data.defaultAccountId ?? data.accounts[0]?.id ?? null,
@@ -214,6 +221,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
       open={open}
       onOpenChange={onOpenChange}
       title={original ? "Edit expense" : "Add expense"}
+      description={message && <p className="m-0 line-clamp-3 text-[13px] text-muted-ink">“{message.body}”</p>}
       headerRight={
         <label className="relative flex min-h-9 cursor-pointer items-center rounded-full border border-line bg-paper px-3 text-sm font-medium">
           {formatDay(date)}
