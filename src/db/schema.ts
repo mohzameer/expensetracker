@@ -364,8 +364,8 @@ export const itemSkips = pgTable(
 
 /**
  * A monthly item marked done for one month although less than planned was paid
- * (e.g. Laundry came to 5,279 of 12,000). For that month it isn't due, and it adds
- * only what was paid to its category's cap. Next month it's back at its full amount.
+ * (e.g. Laundry came to 5,279 of 12,000): for that month the rest isn't due. The
+ * cap doesn't change. Next month it's due in full again.
  */
 export const itemCompletions = pgTable(
   "item_completions",

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * Desktop only: mark a due monthly item done for this month although less than planned
- * was paid (or undo it). The month's cap then keeps only what was paid.
+ * was paid (or undo it), so the rest stops counting as due.
  */
 export function CompleteItemButton({
   itemId,

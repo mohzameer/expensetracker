@@ -156,14 +156,15 @@ export async function removeItemFrom(db: Db, id: string, month: { yearMonth: str
 
 /**
  * "Complete" on a due monthly item: it's done for this month even though less than
- * planned was paid. It stops being due and the month's cap keeps only what was paid;
- * next month it's back at its full amount. `complete: false` undoes it.
+ * planned was paid, so the rest stops counting as due. The category's cap is
+ * untouched: what the item didn't need is free for the category's other spending.
+ * Next month it's due in full again. `complete: false` undoes it.
  */
 export async function setItemComplete(db: Db, input: { itemId: string; ym: string; complete: boolean }) {
   await db.transaction(async (tx) => {
     const month = await lockMonth(tx, input.ym);
     assertOpen(month);
-    const [item] = await tx.select({ kind: items.kind, categoryId: items.categoryId }).from(items).where(eq(items.id, input.itemId));
+    const [item] = await tx.select({ kind: items.kind }).from(items).where(eq(items.id, input.itemId));
     if (!item) throw new UserError("That item no longer exists.");
     if (item.kind !== "monthly") throw new UserError("Only monthly items can be marked complete.");
     if (input.complete) {
@@ -171,7 +172,6 @@ export async function setItemComplete(db: Db, input: { itemId: string; ym: strin
     } else {
       await tx.delete(itemCompletions).where(and(eq(itemCompletions.itemId, input.itemId), eq(itemCompletions.monthId, month.id)));
     }
-    await syncCaps(tx, item.categoryId);
   });
 }
 

@@ -178,7 +178,7 @@ describe("monthly items", () => {
 });
 
 describe("completing a monthly item under its amount", () => {
-  it("stops it being due and keeps only what was paid in that month's cap", async () => {
+  it("stops the rest being due and leaves the cap alone", async () => {
     const s = await seedSeptember(db);
     await s.expense(s.utilities.id, rs(2000), "2026-09-05", s.internet.id); // Internet 3,990 planned
     const internet = async () => (await getMonthlyItems(db, await getMonth(db, "2026-09"))).find((m) => m.itemId === s.internet.id)!;
@@ -186,33 +186,30 @@ describe("completing a monthly item under its amount", () => {
 
     await setItemComplete(db, { itemId: s.internet.id, ym: "2026-09", complete: true });
     expect(await internet()).toMatchObject({ status: "paid", completed: true, paid: rs(2000), expected: rs(3990) });
-    // Cap 18,000 → 2,000 paid + Power 14,010; only Power is still due.
-    expect(await summary("2026-09", s.utilities.id)).toMatchObject({ allocation: rs(16010), remaining: rs(14010) });
+    // Only Power is still due; the 1,990 Internet didn't need stays free in Utilities.
+    expect(await summary("2026-09", s.utilities.id)).toMatchObject({ allocation: rs(18000), remaining: rs(16000) });
     expect((await getUnplanned(db, "2026-09")).find((r) => r.categoryId === s.utilities.id)).toMatchObject({ unplanned: 0, due: rs(14010) });
 
-    // A later payment on it moves the cap with it, never past the planned amount.
-    await s.expense(s.utilities.id, rs(500), "2026-09-20", s.internet.id);
-    expect((await summary("2026-09", s.utilities.id)).allocation).toBe(rs(16510));
-    await s.expense(s.utilities.id, rs(5000), "2026-09-21", s.internet.id);
-    expect((await summary("2026-09", s.utilities.id)).allocation).toBe(rs(18000));
+    // That freed room can go to something unplanned without going over the cap.
+    await s.expense(s.utilities.id, rs(1500));
+    let d = await getDashboard(db, "2026-09");
+    expect(d.short.map((x) => x.name)).not.toContain("Utilities");
+    expect(d.owed.map((o) => o.name)).toEqual(expect.not.arrayContaining(["Internet"]));
+    expect(d.completedShort.map((o) => o.name)).toEqual(["Internet"]);
 
-    // Next month it's back at its full amount; undo brings this month back too.
-    await ensureMonth(db, "2026-10");
-    expect((await summary("2026-10", s.utilities.id)).allocation).toBe(rs(18000));
     await setItemComplete(db, { itemId: s.internet.id, ym: "2026-09", complete: false });
-    expect((await internet()).completed).toBe(false);
+    expect(await internet()).toMatchObject({ status: "partial", completed: false });
+    d = await getDashboard(db, "2026-09");
+    expect(d.completedShort).toEqual([]);
   });
 
-  it("undo restores the full amount and an unpaid item completed counts nothing", async () => {
+  it("is for one month only and for monthly items only", async () => {
     const s = await seedSeptember(db);
     await setItemComplete(db, { itemId: s.power.id, ym: "2026-09", complete: true });
-    expect((await summary("2026-09", s.utilities.id)).allocation).toBe(rs(3990));
-    await setItemComplete(db, { itemId: s.power.id, ym: "2026-09", complete: false });
-    expect((await summary("2026-09", s.utilities.id)).allocation).toBe(rs(18000));
-  });
+    await ensureMonth(db, "2026-10");
+    const oct = await getMonthlyItems(db, await getMonth(db, "2026-10"));
+    expect(oct.find((m) => m.itemId === s.power.id)).toMatchObject({ status: "unpaid", completed: false });
 
-  it("only applies to monthly items", async () => {
-    const s = await seedSeptember(db);
     const snack = await createItem(db, { categoryId: s.groceries.id, name: "Snacks", kind: "one_off", defaultAmount: rs(1000), ym: "2026-09" });
     await expect(setItemComplete(db, { itemId: snack.id, ym: "2026-09", complete: true })).rejects.toThrow(/Only monthly items/);
   });
