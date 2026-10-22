@@ -50,6 +50,8 @@ export type DueItem = {
   expected: number;
   paid: number;
   status: "unpaid" | "partial" | "paid";
+  /** Marked complete for the month although less than planned was paid. */
+  completed: boolean;
 };
 
 export type MonthInfo = { yearMonth: string; status: "open" | "closed"; defaultAlertPct: number } | null;
@@ -114,6 +116,7 @@ export async function getMonthlyItems(db: Db, month: Month | null): Promise<DueI
       expected: monthlyItemStatus.expected,
       paid: monthlyItemStatus.paid,
       status: monthlyItemStatus.status,
+      completed: monthlyItemStatus.completed,
     })
     .from(monthlyItemStatus)
     .innerJoin(categories, eq(categories.id, monthlyItemStatus.categoryId))
@@ -136,7 +139,9 @@ export type UnplannedRow = { yearMonth: string; categoryId: string | null; unpla
 export async function getUnplanned(db: Db, upToYm: string): Promise<UnplannedRow[]> {
   const res = await db.execute(sql`
     WITH planned AS (
-      SELECT month_id, item_id, category_id, expected AS planned, paid FROM monthly_item_status
+      -- An item marked complete planned only what was paid, so nothing more is due.
+      SELECT month_id, item_id, category_id, CASE WHEN completed THEN least(expected, paid) ELSE expected END AS planned, paid
+      FROM monthly_item_status
       UNION ALL
       SELECT i.month_id, i.id, i.category_id, coalesce(i.default_amount, 0),
         coalesce((SELECT sum(e.amount) FROM expenses e JOIN months m ON m.id = i.month_id
@@ -463,6 +468,7 @@ export async function getDashboard(db: Db, ym: string) {
     short,
     unplannedMonths,
     owed,
+    completedShort: monthly.filter((m) => m.completed && m.paid < m.expected),
     accounts: accountList,
     plan,
     weeks: weeks.map((w) => ({ label: w.label, detail: w.detail, total: w.total, days: diffDays(w.to, w.from) })),

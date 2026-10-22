@@ -148,6 +148,13 @@
       "when": 1792670347736,
       "tag": "0020_expense_amount_zero",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792680934099,
+      "tag": "0021_item_completions",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@ import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { BarChart3, Check, ChevronDown, ChevronLeft, ChevronRight, Lock, Plus, Wallet, X } from "lucide-react";
 import { ExpenseSheet, type ExpensePayload, type ExpenseSheetMode } from "@/components/sheets/expense-sheet";
+import { CompleteItemButton } from "@/components/complete-item-button";
 import { CoverSheet } from "@/components/sheets/cover-sheet";
 import { MoveSheet, type MovePayload } from "@/components/sheets/move-sheet";
 import {
@@ -309,6 +310,7 @@ export function DayView({ data }: { data: DayData }) {
                   <DueRow
                     key={d.itemId}
                     item={d}
+                    ym={data.ym}
                     onLog={() => openSheet({ kind: "add", prefill: { categoryId: d.categoryId, itemId: d.itemId, amount: d.expected - d.paid } })}
                   />
                 ))}
@@ -321,7 +323,7 @@ export function DayView({ data }: { data: DayData }) {
                 summary={formatMoney(paid.reduce((a, d) => a + d.paid, 0), data.currency)}
               >
                 {paid.map((d) => (
-                  <PaidRow key={d.itemId} item={d} />
+                  <PaidRow key={d.itemId} item={d} ym={data.ym} />
                 ))}
               </FoldSection>
             )}
@@ -535,8 +537,9 @@ function MessageRow({
   );
 }
 
-function PaidRow({ item }: { item: DueItem }) {
+function PaidRow({ item, ym }: { item: DueItem; ym: string }) {
   const over = item.paid - item.expected;
+  const short = item.completed && item.paid < item.expected;
   return (
     <li className="flex items-center gap-3 py-2.5 pr-3.5 pl-3.5">
       <span aria-label="Paid" className="flex size-[18px] shrink-0 items-center justify-center rounded-full bg-ok">
@@ -549,12 +552,14 @@ function PaidRow({ item }: { item: DueItem }) {
       <div className="flex flex-col items-end gap-0.5">
         <span className="text-[15px] font-medium">{formatAmount(item.paid)}</span>
         {over > 0 && <span className="text-[11px] font-semibold text-warn">paid +{formatAmount(over)}</span>}
+        {short && <span className="text-[11px] text-muted-ink">completed · of {formatAmount(item.expected)}</span>}
       </div>
+      {short && <CompleteItemButton itemId={item.itemId} name={item.name} ym={ym} complete={false} />}
     </li>
   );
 }
 
-function DueRow({ item, onLog }: { item: DueItem; onLog: () => void }) {
+function DueRow({ item, ym, onLog }: { item: DueItem; ym: string; onLog: () => void }) {
   const owed = item.expected - item.paid;
   return (
     <li className="flex items-center gap-3 py-2.5 pr-3 pl-3.5">
@@ -583,6 +588,7 @@ function DueRow({ item, onLog }: { item: DueItem; onLog: () => void }) {
       >
         Log
       </button>
+      <CompleteItemButton itemId={item.itemId} name={item.name} ym={ym} complete />
     </li>
   );
 }

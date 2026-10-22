@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, isNotNull, isNull, lt, max, or, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { type ItemKind, categories, categoryBudgets, expenses, incomes, items, itemSkips, months, settings, transfers } from "@/db/schema";
+import { type ItemKind, categories, categoryBudgets, expenses, incomes, itemCompletions, items, itemSkips, months, settings, transfers } from "@/db/schema";
 import { addMonths, APP_TIMEZONE, formatMonth, today } from "@/lib/dates";
 import { UserError } from "@/lib/errors";
 import { CATEGORY_COLORS } from "@/lib/palette";
@@ -152,6 +152,27 @@ export async function removeItemFrom(db: Db, id: string, month: { yearMonth: str
   } else {
     await removeItem(db, id);
   }
+}
+
+/**
+ * "Complete" on a due monthly item: it's done for this month even though less than
+ * planned was paid. It stops being due and the month's cap keeps only what was paid;
+ * next month it's back at its full amount. `complete: false` undoes it.
+ */
+export async function setItemComplete(db: Db, input: { itemId: string; ym: string; complete: boolean }) {
+  await db.transaction(async (tx) => {
+    const month = await lockMonth(tx, input.ym);
+    assertOpen(month);
+    const [item] = await tx.select({ kind: items.kind, categoryId: items.categoryId }).from(items).where(eq(items.id, input.itemId));
+    if (!item) throw new UserError("That item no longer exists.");
+    if (item.kind !== "monthly") throw new UserError("Only monthly items can be marked complete.");
+    if (input.complete) {
+      await tx.insert(itemCompletions).values({ itemId: input.itemId, monthId: month.id }).onConflictDoNothing();
+    } else {
+      await tx.delete(itemCompletions).where(and(eq(itemCompletions.itemId, input.itemId), eq(itemCompletions.monthId, month.id)));
+    }
+    await syncCaps(tx, item.categoryId);
+  });
 }
 
 /** Items with history are archived; unused ones are deleted. */

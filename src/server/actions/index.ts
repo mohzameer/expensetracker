@@ -6,7 +6,7 @@ import { getSession, passcodeMatches } from "@/lib/auth";
 import { today } from "@/lib/dates";
 import * as s from "@/lib/schemas";
 import { runAction } from "@/server/action";
-import { createCategory, createItem, saveSetup, setChartHiddenCategories } from "@/server/domain/catalog";
+import { createCategory, createItem, saveSetup, setChartHiddenCategories, setItemComplete } from "@/server/domain/catalog";
 import { assignCategory, createExpense, deleteExpense, updateExpense } from "@/server/domain/expenses";
 import { closeMonth } from "@/server/domain/months";
 import { dismissMessage, ingestMessage, logMessage, logTransfer, restoreMessage, setMessageSenders } from "@/server/domain/messages";
@@ -126,6 +126,11 @@ export async function setDefaultAccountAction(accountId: string) {
 }
 
 // ---- charts ----
+
+export async function setItemCompleteAction(input: { itemId: string; ym: string; complete: boolean }) {
+  const schema = z.object({ itemId: s.id, ym: s.yearMonth, complete: z.boolean() });
+  return runAction(schema, input, (db, d) => setItemComplete(db, d));
+}
 
 export async function setChartHiddenCategoriesAction(ids: string[]) {
   return runAction(z.array(s.id).max(500), ids, (db, d) => setChartHiddenCategories(db, d));

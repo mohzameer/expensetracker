@@ -6,6 +6,7 @@ import { DonutChart } from "@/components/charts/donut-chart";
 import { ChartFilter } from "@/components/charts/chart-filter";
 import { MoneyBand } from "@/components/income/money-band";
 import { CoverButton } from "@/components/sheets/cover-button";
+import { CompleteItemButton } from "@/components/complete-item-button";
 import type { getDashboard } from "@/server/queries";
 import { formatMonth } from "@/lib/dates";
 import { formatAmount, formatMoney } from "@/lib/money";
@@ -215,7 +216,7 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
             </div>
           </section>
 
-          {data.owed.length > 0 && (
+          {(data.owed.length > 0 || data.completedShort.length > 0) && (
             <section className="card flex flex-col gap-2 p-5 lg:px-6">
               <h2 className="text-[17px] font-semibold">Unpaid & partial monthly items</h2>
               <ul className="divide-y divide-line-soft text-sm">
@@ -228,9 +229,28 @@ export function Dashboard({ data, today }: { data: Data; today: string }) {
                       {o.status === "partial" ? `${formatAmount(o.paid)} paid` : "Unpaid"}
                     </span>
                     <span className="w-24 text-right font-semibold">{formatAmount(o.expected - o.paid)}</span>
+                    {!closed && <CompleteItemButton itemId={o.itemId} name={o.name} ym={data.ym} complete />}
                   </li>
                 ))}
               </ul>
+              {data.completedShort.length > 0 && (
+                <div className="flex flex-col gap-1 border-t border-line-soft pt-3">
+                  <span className="text-[13px] text-muted-ink">Completed for this month, under plan</span>
+                  <ul className="flex flex-col text-sm">
+                    {data.completedShort.map((o) => (
+                      <li key={o.itemId} className="flex min-h-9 items-center gap-3">
+                        <span className="flex-1">
+                          <span className="font-medium">{o.name}</span> <span className="text-muted-ink">· {o.categoryName}</span>
+                        </span>
+                        <span className="text-muted-ink">
+                          {formatAmount(o.paid)} of {formatAmount(o.expected)}
+                        </span>
+                        {!closed && <CompleteItemButton itemId={o.itemId} name={o.name} ym={data.ym} complete={false} />}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </section>
           )}
         </>

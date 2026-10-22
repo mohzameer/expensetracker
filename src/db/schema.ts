@@ -362,7 +362,25 @@ export const itemSkips = pgTable(
   (t) => [primaryKey({ columns: [t.itemId, t.monthId] })],
 );
 
-/** Per month and monthly item: expected, paid so far and status. */
+/**
+ * A monthly item marked done for one month although less than planned was paid
+ * (e.g. Laundry came to 5,279 of 12,000). For that month it isn't due, and it adds
+ * only what was paid to its category's cap. Next month it's back at its full amount.
+ */
+export const itemCompletions = pgTable(
+  "item_completions",
+  {
+    itemId: uuid()
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    monthId: uuid()
+      .notNull()
+      .references(() => months.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.itemId, t.monthId] })],
+);
+
+/** Per month and monthly item: expected, paid so far and status ("paid" once marked complete). */
 export const monthlyItemStatus = pgView("monthly_item_status", {
   monthId: uuid().notNull(),
   yearMonth: char({ length: 7 }).notNull(),
@@ -372,6 +390,8 @@ export const monthlyItemStatus = pgView("monthly_item_status", {
   expected: money().notNull(),
   paid: money().notNull(),
   status: text({ enum: ["unpaid", "partial", "paid"] }).notNull(),
+  /** Marked complete for this month (see item_completions). */
+  completed: boolean().notNull(),
 }).existing();
 
 /** Current balance of each account: entries + income received into it − expenses paid from it. */
