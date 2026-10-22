@@ -3,6 +3,7 @@ import type { Db } from "@/db/client";
 import { categoryMonthSummary, expenses, items } from "@/db/schema";
 import { UserError } from "@/lib/errors";
 import { stateAfter } from "@/lib/budget";
+import { syncCapsForPaidItems } from "./caps";
 import { assertOpen, ensureMonth, getMonth, monthOfDate } from "./months";
 
 export type ExpenseInput = {
@@ -40,6 +41,7 @@ export async function createExpense(db: Db, input: ExpenseInput) {
   assertOpen(await ensureMonth(db, ym));
   await checkItem(db, input);
   const [row] = await db.insert(expenses).values(input).returning();
+  await syncCapsForPaidItems(db, [row.itemId]);
   return { expense: row, category: await categoryState(db, row.categoryId, ym) };
 }
 
@@ -51,6 +53,7 @@ export async function updateExpense(db: Db, id: string, input: ExpenseInput) {
   assertOpen(await ensureMonth(db, ym));
   await checkItem(db, input);
   const [row] = await db.update(expenses).set({ ...input, updatedAt: new Date() }).where(eq(expenses.id, id)).returning();
+  await syncCapsForPaidItems(db, [old.itemId, row.itemId]);
   return { expense: row, category: await categoryState(db, row.categoryId, ym) };
 }
 
@@ -59,6 +62,7 @@ export async function deleteExpense(db: Db, id: string) {
   if (!old) return;
   assertOpen(await getMonth(db, await monthOfDate(db, old.spentOn)));
   await db.delete(expenses).where(eq(expenses.id, id));
+  await syncCapsForPaidItems(db, [old.itemId]);
 }
 
 /** Needs-category inbox: give an uncategorised expense a category. */
@@ -68,5 +72,6 @@ export async function assignCategory(db: Db, id: string, categoryId: string) {
   const ym = await monthOfDate(db, old.spentOn);
   assertOpen(await ensureMonth(db, ym));
   await db.update(expenses).set({ categoryId, itemId: null, updatedAt: new Date() }).where(eq(expenses.id, id));
+  await syncCapsForPaidItems(db, [old.itemId]);
   return categoryState(db, categoryId, ym);
 }

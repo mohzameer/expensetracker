@@ -3,11 +3,13 @@
 import { useTransition } from "react";
 import { toast } from "sonner";
 import { setItemCompleteAction } from "@/server/actions";
+import { formatAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 /**
  * Desktop only: mark a due monthly item done for this month although less than planned
- * was paid (or undo it), so the rest stops counting as due.
+ * was paid (or undo it). The rest stops counting as due, and whatever of it is still
+ * free in the category comes off the cap.
  */
 export function CompleteItemButton({
   itemId,
@@ -29,7 +31,10 @@ export function CompleteItemButton({
     start(async () => {
       const res = await setItemCompleteAction({ itemId, ym, complete: value });
       if (!res.ok) return void toast.error(res.error);
-      if (value) toast(`${name} is done for this month`, { action: { label: "Undo", onClick: () => run(false) } });
+      if (value) {
+        const freed = res.data.released > 0 ? ` · ${formatAmount(res.data.released)} off the cap` : "";
+        toast(`${name} is done for this month${freed}`, { action: { label: "Undo", onClick: () => run(false) } });
+      }
       else toast(`${name} is due again`);
     });
 

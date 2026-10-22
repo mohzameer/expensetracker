@@ -364,8 +364,8 @@ export const itemSkips = pgTable(
 
 /**
  * A monthly item marked done for one month although less than planned was paid
- * (e.g. Laundry came to 5,279 of 12,000): for that month the rest isn't due. The
- * cap doesn't change. Next month it's due in full again.
+ * (e.g. Laundry came to 5,279 of 12,000): for that month the rest isn't due, and
+ * `released` comes off the category's cap. Next month it's due in full again.
  */
 export const itemCompletions = pgTable(
   "item_completions",
@@ -376,8 +376,11 @@ export const itemCompletions = pgTable(
     monthId: uuid()
       .notNull()
       .references(() => months.id, { onDelete: "cascade" }),
+    // The part of the item's unused amount still free in the category when it was
+    // completed (not already spent elsewhere or needed by other items still due).
+    released: money().notNull().default(0),
   },
-  (t) => [primaryKey({ columns: [t.itemId, t.monthId] })],
+  (t) => [primaryKey({ columns: [t.itemId, t.monthId] }), check("item_completions_released", sql`released >= 0`)],
 );
 
 /** Per month and monthly item: expected, paid so far and status ("paid" once marked complete). */

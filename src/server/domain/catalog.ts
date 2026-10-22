@@ -156,22 +156,44 @@ export async function removeItemFrom(db: Db, id: string, month: { yearMonth: str
 
 /**
  * "Complete" on a due monthly item: it's done for this month even though less than
- * planned was paid, so the rest stops counting as due. The category's cap is
- * untouched: what the item didn't need is free for the category's other spending.
- * Next month it's due in full again. `complete: false` undoes it.
+ * planned was paid, so the rest stops counting as due. What it didn't need comes off
+ * the cap, but only the part still free in the category: whatever was already spent
+ * on other things, or is needed by its other items still due, stays. So completing
+ * never puts a category over. Next month it's due in full again. `complete: false` undoes it.
  */
 export async function setItemComplete(db: Db, input: { itemId: string; ym: string; complete: boolean }) {
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     const month = await lockMonth(tx, input.ym);
     assertOpen(month);
-    const [item] = await tx.select({ kind: items.kind }).from(items).where(eq(items.id, input.itemId));
+    const [item] = await tx.select({ kind: items.kind, categoryId: items.categoryId }).from(items).where(eq(items.id, input.itemId));
     if (!item) throw new UserError("That item no longer exists.");
     if (item.kind !== "monthly") throw new UserError("Only monthly items can be marked complete.");
-    if (input.complete) {
-      await tx.insert(itemCompletions).values({ itemId: input.itemId, monthId: month.id }).onConflictDoNothing();
-    } else {
-      await tx.delete(itemCompletions).where(and(eq(itemCompletions.itemId, input.itemId), eq(itemCompletions.monthId, month.id)));
-    }
+
+    // Start from the cap without this item's own completion.
+    await tx.delete(itemCompletions).where(and(eq(itemCompletions.itemId, input.itemId), eq(itemCompletions.monthId, month.id)));
+    await syncCaps(tx, item.categoryId);
+    if (!input.complete) return { released: 0 };
+
+    const res = await tx.execute(sql`
+      SELECT
+        coalesce((SELECT greatest(expected - paid, 0) FROM monthly_item_status
+                  WHERE month_id = ${month.id} AND item_id = ${input.itemId}), 0) AS unused,
+        coalesce((SELECT remaining FROM category_month_summary
+                  WHERE month_id = ${month.id} AND category_id = ${item.categoryId}), 0) AS remaining,
+        coalesce((SELECT sum(expected - paid) FROM monthly_item_status
+                  WHERE month_id = ${month.id} AND category_id = ${item.categoryId}
+                    AND item_id <> ${input.itemId} AND status <> 'paid'), 0)
+        + coalesce((SELECT sum(greatest(coalesce(i.default_amount, 0) - coalesce((SELECT sum(e.amount) FROM expenses e
+                      WHERE e.item_id = i.id AND e.spent_on >= ${month.startsOn} AND e.spent_on < ${month.endsOn}), 0), 0))
+                    FROM items i
+                    WHERE i.category_id = ${item.categoryId} AND i.kind = 'one_off' AND i.month_id = ${month.id}
+                      AND i.archived_at IS NULL), 0) AS still_due`);
+    const [row] = (res as unknown as { rows: { unused: string | number; remaining: string | number; still_due: string | number }[] }).rows;
+    const free = Number(row.remaining) - Number(row.still_due);
+    const released = Math.min(Number(row.unused), Math.max(free, 0));
+    await tx.insert(itemCompletions).values({ itemId: input.itemId, monthId: month.id, released });
+    await syncCaps(tx, item.categoryId);
+    return { released };
   });
 }
 
