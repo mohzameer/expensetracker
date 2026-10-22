@@ -141,6 +141,13 @@
       "when": 1792496540820,
       "tag": "0019_item_end_as_needed",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792670347736,
+      "tag": "0020_expense_amount_zero",
+      "breakpoints": true
     }
   ]
 }

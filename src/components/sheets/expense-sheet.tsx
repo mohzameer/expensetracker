@@ -77,6 +77,9 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
   // A bank text's amount is what was actually charged, so it counts as typed too.
   const [amountTyped, setAmountTyped] = useState(!!original || (!!message && prefill?.amount != null));
   const [note, setNote] = useState(original?.note ?? prefill?.note ?? "");
+  // Money that came back (e.g. lent and returned): the entry stays as history at 0.
+  const [zeroed, setZeroed] = useState(!!original && original.amount === 0);
+  const [noteBeforeZero, setNoteBeforeZero] = useState<string | null>(null);
   // New expenses default to the chosen default account (ComBank); edits keep what was saved.
   const [accountId, setAccountId] = useState<string | null>(
     original?.accountId ?? data.defaultAccountId ?? data.accounts[0]?.id ?? null,
@@ -122,7 +125,21 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
   const selectedItem = items.find((i) => i.id === itemId) ?? null;
   const selectedCategory = categories.find((c) => c.id === categoryId) ?? null;
 
-  const amount = parseMoney(amountStr);
+  const amount = zeroed ? 0 : parseMoney(amountStr);
+
+  // Ticking "Returned" notes what the entry was, so the history keeps the amount; unticking puts it back.
+  const toggleZero = (on: boolean) => {
+    setZeroed(on);
+    if (on) {
+      const was = parseMoney(amountStr);
+      if (!was) return;
+      setNoteBeforeZero(note);
+      setNote(`${note.trim() ? `${note.trim()} · ` : ""}Returned ${formatAmount(was)}`.slice(0, 200));
+    } else if (noteBeforeZero !== null) {
+      setNote(noteBeforeZero);
+      setNoteBeforeZero(null);
+    }
+  };
 
   // Live budget line: the cached per-category summary, minus what's being typed.
   const budget = useMemo(() => {
@@ -195,7 +212,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amount) return void toast.error("Enter an amount above zero.");
+    if (amount === null || (!amount && !zeroed)) return void toast.error("Enter an amount above zero.");
     if (!noDeduct && !accountId) return void toast.error("Choose which account paid.");
     onSubmit(
       {
@@ -385,14 +402,29 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
               inputMode="decimal"
               autoComplete="off"
               placeholder="0"
-              value={amountStr}
+              disabled={zeroed}
+              value={zeroed ? "0" : amountStr}
               onChange={(e) => {
                 setAmountStr(e.target.value.replace(/[^0-9.,]/g, ""));
                 setAmountTyped(true);
               }}
-              className="w-24 min-w-0 flex-1 bg-transparent py-2.5 font-display text-[34px] font-semibold text-ink outline-none placeholder:text-line-strong"
+              className="w-24 min-w-0 flex-1 bg-transparent py-2.5 font-display text-[34px] font-semibold text-ink outline-none placeholder:text-line-strong disabled:text-muted-ink"
             />
           </div>
+          {original && (
+            <label className="flex min-h-11 cursor-pointer items-start gap-2.5 pt-1">
+              <input
+                type="checkbox"
+                checked={zeroed}
+                onChange={(e) => toggleZero(e.target.checked)}
+                className="mt-0.5 size-[18px] shrink-0 accent-teal"
+              />
+              <span className="flex flex-col">
+                <span className="text-sm font-medium">Returned, set to zero</span>
+                <span className="text-xs text-muted-ink">The money came back. Keeps this entry and its note, but it no longer counts for the budget or the account.</span>
+              </span>
+            </label>
+          )}
           {selectedItem?.kind === "monthly" && sameMonth && (() => {
             const st = paidFor(selectedItem.id);
             if (!st) return null;
@@ -429,7 +461,7 @@ export function ExpenseSheet({ open, onOpenChange, mode, date: initialDate, data
                     <span className="flex flex-col">
                       <span className="text-[15px] font-medium">{a.name}</span>
                       <span className={cn("text-xs", deducting && after < 0 ? "font-semibold text-bad" : "text-muted-ink")}>
-                        {deducting && amount ? `${formatAmount(after)} after` : formatAmount(a.balance)}
+                        {deducting && (amount || zeroed) ? `${formatAmount(after)} after` : formatAmount(a.balance)}
                       </span>
                     </span>
                   </label>

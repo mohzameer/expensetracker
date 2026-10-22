@@ -130,6 +130,20 @@ describe("accounts", () => {
     expect((await bal()).ComBank).toBe(rs(183282 - 2850 + 100000));
   });
 
+  it("money that came back: an expense edited to zero stays, and gives back budget and balance", async () => {
+    const s = await seedSeptember(db);
+    const com = await createAccount(db, { name: "ComBank", opening: rs(50000), todayStr: "2026-09-29" });
+    const lent = { spentOn: "2026-09-29", categoryId: s.groceries.id, itemId: null, amount: rs(5000), note: "Lent to Sam", accountId: com.id };
+    const { expense } = await createExpense(db, lent);
+    expect((await getAccounts(db))[0].balance).toBe(rs(45000));
+
+    const res = await updateExpense(db, expense.id, { ...lent, amount: 0, note: "Lent to Sam · Returned 5,000.00" });
+    expect(res.expense.amount).toBe(0);
+    expect(res.category?.remaining).toBe(rs(30000));
+    expect((await getAccounts(db))[0].balance).toBe(rs(50000));
+    await expect(db.update(expenses).set({ amount: -1 }).where(eq(expenses.id, expense.id))).rejects.toThrow();
+  });
+
   it("income needs an account before it can be received", async () => {
     await seedSeptember(db);
     await saveSetup(db, {

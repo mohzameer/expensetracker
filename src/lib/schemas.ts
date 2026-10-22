@@ -6,6 +6,8 @@ import { isIsoDate, isYearMonth } from "./dates";
 export const isoDate = z.string().refine(isIsoDate, "Invalid date");
 export const yearMonth = z.string().refine(isYearMonth, "Invalid month");
 export const amount = z.number().int().positive("Enter an amount above zero").max(1e13);
+// An expense can be edited down to 0 when its money came back (the entry stays as history).
+export const expenseAmount = z.number().int().min(0, "Enter an amount").max(1e13);
 export const optionalAmount = z.number().int().positive().max(1e13).nullable();
 export const alertPct = z.number().int().min(0).max(100);
 export const name = z.string().trim().min(1, "Name is required").max(60);
@@ -18,7 +20,7 @@ export const expenseInput = z.object({
   spentOn: isoDate,
   categoryId: id.nullable(),
   itemId: id.nullable(),
-  amount,
+  amount: expenseAmount,
   note: z.string().trim().max(200).nullable(),
   accountId: id.nullable(), // null only when editing an expense from before accounts existed
 });

@@ -213,7 +213,8 @@ export const expenses = pgTable(
       columns: [t.itemId, t.categoryId],
       foreignColumns: [items.id, items.categoryId],
     }),
-    check("expenses_amount_positive", sql`amount > 0`),
+    // Zero is allowed: an expense whose money came back keeps its entry at 0.
+    check("expenses_amount_nonnegative", sql`amount >= 0`),
     check("expenses_item_needs_category", sql`item_id is null or category_id is not null`),
     index("expenses_spent_on_idx").on(t.spentOn),
     index("expenses_category_spent_on_idx").on(t.categoryId, t.spentOn),
