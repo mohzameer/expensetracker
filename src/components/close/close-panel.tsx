@@ -15,6 +15,8 @@ type Data = Awaited<ReturnType<typeof getClosePage>>;
 
 const selectCls =
   "min-h-11 w-full rounded-xl border border-line-strong bg-surface px-3 text-[15px] outline-none focus:border-teal sm:w-56";
+// Money columns: right-aligned, never wrapped, with room between neighbours.
+const numCls = "py-2.5 pl-3 text-right whitespace-nowrap sm:pl-8";
 
 export function ClosePanel({ data }: { data: Data }) {
   const [pending, start] = useTransition();
@@ -45,6 +47,10 @@ export function ClosePanel({ data }: { data: Data }) {
     }),
     { allocated: 0, spent: 0, toSavings: 0 },
   );
+
+  // The Left total counts only money that will move; say so while a category is still negative.
+  const totalNote =
+    negatives.length > 0 && !closed ? `before ${negatives.map((n) => n.name).join(", ")} ${negatives.length === 1 ? "is" : "are"} covered` : "";
 
   const reasons: string[] = [];
   if (!data.month) reasons.push(`Nothing has been recorded for ${month}.`);
@@ -191,7 +197,7 @@ export function ClosePanel({ data }: { data: Data }) {
         </div>
       )}
 
-      <section className="card flex flex-col gap-2 overflow-x-auto p-5">
+      <section className="card flex flex-col gap-2 overflow-x-auto p-4 sm:p-5">
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="text-[17px] font-semibold">{closed ? "Swept to Savings" : "Sweep to Savings"}</h2>
           {!closed && <span className="text-[13px] text-muted-ink">Preview · updates as you cover</span>}
@@ -199,42 +205,60 @@ export function ClosePanel({ data }: { data: Data }) {
         {data.summaries.length === 0 ? (
           <p className="py-4 text-[15px] text-muted-ink">No budgets for {month} yet.</p>
         ) : (
-          <table className="w-full min-w-[640px] text-left text-sm">
+          <table className="w-full text-left text-sm tabular-nums sm:min-w-[720px]">
             <thead>
               <tr className="border-b border-line text-[13px] text-muted-ink">
-                <th className="py-2 font-medium">Category</th>
-                <th className="py-2 text-right font-medium">Allocated</th>
-                <th className="py-2 text-right font-medium">Spent</th>
-                <th className="py-2 text-right font-medium">To Savings</th>
-                <th className="py-2 pl-6 font-medium">Heads-up</th>
+                <th className="py-2 pr-3 font-medium">Category</th>
+                <th className={cn(numCls, "font-medium")}>Allocated</th>
+                <th className={cn(numCls, "font-medium")}>Spent</th>
+                <th className={cn(numCls, "font-medium")}>{closed ? "Swept" : "Left"}</th>
+                <th className="hidden py-2 pl-8 font-medium sm:table-cell">Notes</th>
               </tr>
             </thead>
-            <tbody>
-              {data.summaries.map((s) => {
-                const toSavings = closed ? s.swept : s.remaining;
-                const note = s.remaining < 0 && !closed ? "Cover before closing" : headsUp(s.categoryId);
-                return (
-                  <tr key={s.categoryId} className="border-b border-line-soft">
-                    <td className="py-2.5 font-medium">
-                      <span aria-hidden className="mr-2 inline-block size-2 rounded-full" style={{ background: s.color }} />
-                      {s.name}
+            {data.summaries.map((s) => {
+              const toSavings = closed ? s.swept : s.remaining;
+              const note = s.remaining < 0 && !closed ? "Cover before closing" : headsUp(s.categoryId);
+              const noteCls = cn("text-[13px]", s.remaining < 0 && !closed ? "font-semibold text-bad" : "text-warn");
+              // One tbody per category so the phone-only note line shares the row's border.
+              return (
+                <tbody key={s.categoryId} className="border-b border-line-soft">
+                  <tr>
+                    <td className="py-2.5 pr-3 font-medium sm:whitespace-nowrap">
+                      <span className="flex items-center gap-2">
+                        <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: s.color }} />
+                        {s.name}
+                      </span>
                     </td>
-                    <td className="py-2.5 text-right">{formatAmount(s.effectiveAllocation)}</td>
-                    <td className="py-2.5 text-right">{formatAmount(s.spent)}</td>
-                    <td className={cn("py-2.5 text-right font-semibold", toSavings < 0 ? "text-bad" : "text-ok")}>{formatAmount(toSavings)}</td>
-                    <td className={cn("py-2.5 pl-6 text-[13px]", s.remaining < 0 && !closed ? "font-semibold text-bad" : "text-warn")}>{note}</td>
+                    <td className={numCls}>{formatAmount(s.effectiveAllocation)}</td>
+                    <td className={numCls}>{formatAmount(s.spent)}</td>
+                    <td className={cn(numCls, "font-semibold", toSavings < 0 ? "text-bad" : "text-ok")}>{formatAmount(toSavings)}</td>
+                    <td className={cn(noteCls, "hidden py-2.5 pl-8 sm:table-cell")}>{note}</td>
                   </tr>
-                );
-              })}
-              <tr className="font-semibold">
-                <td className="pt-3">Total to Savings</td>
-                <td className="pt-3 text-right">{formatAmount(totals.allocated)}</td>
-                <td className="pt-3 text-right">{formatAmount(totals.spent)}</td>
-                <td className="pt-3 text-right text-ok">{formatAmount(totals.toSavings)}</td>
-                <td className="pt-3 pl-6 text-[13px] font-normal text-muted-ink">
-                  {negatives.length > 0 && !closed ? `before ${negatives.map((n) => n.name).join(", ")} ${negatives.length === 1 ? "is" : "are"} covered` : ""}
-                </td>
+                  {note && (
+                    <tr className="sm:hidden">
+                      <td colSpan={4} className={cn(noteCls, "pb-2.5 pl-4")}>
+                        {note}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              );
+            })}
+            <tbody>
+              <tr className="border-t-2 border-line font-semibold">
+                <td className="pt-3 pr-3">Total</td>
+                <td className={cn(numCls, "pt-3")}>{formatAmount(totals.allocated)}</td>
+                <td className={cn(numCls, "pt-3")}>{formatAmount(totals.spent)}</td>
+                <td className={cn(numCls, "pt-3 text-ok")}>{formatAmount(totals.toSavings)}</td>
+                <td className="hidden pt-3 pl-8 text-[13px] font-normal text-muted-ink sm:table-cell">{totalNote}</td>
               </tr>
+              {totalNote && (
+                <tr className="sm:hidden">
+                  <td colSpan={4} className="pt-1 text-right text-[13px] text-muted-ink">
+                    {totalNote}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         )}
